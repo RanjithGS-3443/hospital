@@ -1,10 +1,12 @@
+
 "use client";
 
 import type React from 'react';
 import { useState, useEffect } from 'react';
 import { useForm, type SubmitHandler } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Button } from '@/components/ui/button';
+import Link from 'next/link';
+import { Button, buttonVariants } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -16,7 +18,7 @@ import { useToast } from '@/hooks/use-toast';
 import { patientInfoSchema, type PatientInfoFormData } from '@/lib/schemas';
 import { getAISuggestions } from './actions';
 import type { SuggestServicesOutput } from '@/ai/flows/suggest-services';
-import { Loader2, LogOut, UserCircle, Phone, ClipboardEdit, Sparkles, CheckCircle2, AlertTriangle } from 'lucide-react';
+import { Loader2, LogOut, UserCircle, Phone, ClipboardEdit, Sparkles, CheckCircle2, AlertTriangle, Users } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 
 export default function DashboardPage() {
@@ -53,10 +55,9 @@ export default function DashboardPage() {
 
   const handleInfoSubmit: SubmitHandler<PatientInfoFormData> = async (data) => {
     setIsSubmittingInfo(true);
-    // Simulate brief processing
     await new Promise(resolve => setTimeout(resolve, 300));
     setSubmittedData(data);
-    setAiSuggestions(null); // Clear previous suggestions
+    setAiSuggestions(null); 
     toast({
       title: "Information Saved",
       description: "Your details have been recorded for confirmation.",
@@ -98,13 +99,19 @@ export default function DashboardPage() {
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
-      <header className="sticky top-0 z-10 flex items-center justify-between border-b bg-card p-4 shadow-sm">
+      <header className="sticky top-0 z-50 flex items-center justify-between border-b bg-card p-4 shadow-sm print:hidden">
         <Logo iconSize={6} textSize="text-xl" />
-        <div className="flex items-center gap-4">
-          <span className="text-sm text-muted-foreground hidden sm:inline">Welcome, {user?.name || user?.email}</span>
+        <div className="flex items-center gap-2 sm:gap-4">
+          <Link href="/doctors" className={buttonVariants({ variant: "ghost", size: "sm" })}>
+            <Users className="mr-0 h-4 w-4 sm:mr-2" />
+            <span className="hidden sm:inline">Doctors</span>
+          </Link>
+          <div className="text-sm text-muted-foreground hidden md:flex items-center gap-1">
+            <span className="hidden lg:inline">Welcome,</span> {user?.name?.split(' ')[0] || user?.email}
+          </div>
           <Button variant="outline" size="sm" onClick={logout}>
-            <LogOut className="mr-2 h-4 w-4" />
-            Logout
+            <LogOut className="mr-0 h-4 w-4 sm:mr-2" />
+             <span className="hidden sm:inline">Logout</span>
           </Button>
         </div>
       </header>
@@ -115,7 +122,7 @@ export default function DashboardPage() {
             <CardTitle className="flex items-center gap-2 text-xl md:text-2xl text-primary">
               <ClipboardEdit className="h-6 w-6" /> Patient Information
             </CardTitle>
-            <CardDescription>Please enter the patient's details below.</CardDescription>
+            <CardDescription>Please enter the patient's details below. This information can be used to get AI assistance for services.</CardDescription>
           </CardHeader>
           <CardContent>
             <Form {...form}>
@@ -174,7 +181,7 @@ export default function DashboardPage() {
               <CardTitle className="flex items-center gap-2 text-xl md:text-2xl text-primary">
                 <CheckCircle2 className="h-6 w-6 text-green-500" /> Information Confirmation
               </CardTitle>
-              <CardDescription>Please review the entered information. If correct, proceed to get assistance.</CardDescription>
+              <CardDescription>Review the entered information. If correct, you can get AI-powered assistance.</CardDescription>
             </CardHeader>
             <CardContent className="space-y-3 text-sm">
               <p><strong>Name:</strong> {submittedData.name}</p>
@@ -218,7 +225,7 @@ export default function DashboardPage() {
             </CardHeader>
             <CardContent>
               {aiSuggestions.suggestedServices ? (
-                <div className="prose prose-sm max-w-none text-foreground">
+                <div className="prose prose-sm max-w-none text-foreground dark:prose-invert">
                   {aiSuggestions.suggestedServices.split('\n').map((line, index) => (
                     <p key={index}>{line}</p>
                   ))}
@@ -233,9 +240,10 @@ export default function DashboardPage() {
           </Card>
         )}
       </main>
-      <footer className="py-4 text-center text-sm text-muted-foreground border-t">
+      <footer className="py-4 text-center text-sm text-muted-foreground border-t print:hidden">
         © {new Date().getFullYear()} HealthDesk. All rights reserved.
       </footer>
     </div>
   );
 }
+
