@@ -6,8 +6,8 @@ import Image from 'next/image';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, DialogTrigger, DialogClose } from '@/components/ui/dialog';
-import { Stethoscope, CalendarClock, User, CheckCircle, Info } from 'lucide-react';
-import type { Doctor } from '@/lib/types';
+import { Stethoscope, CalendarClock, User, CheckCircle, Info, Clock } from 'lucide-react';
+import type { Doctor, Appointment } from '@/lib/types';
 import { useToast } from '@/hooks/use-toast';
 import { useState } from 'react';
 
@@ -15,17 +15,44 @@ interface DoctorCardProps {
   doctor: Doctor;
 }
 
+const APPOINTMENTS_STORAGE_KEY = 'healthdesk.appointments';
+
 export function DoctorCard({ doctor }: DoctorCardProps) {
   const { toast } = useToast();
   const [isDialogOpen, setIsDialogOpen] = useState(false);
 
   const handleBookingConfirm = () => {
-    // Simulate booking
-    toast({
-      title: "Appointment Request Sent!",
-      description: `Your request to book an appointment with ${doctor.name} has been sent. We will contact you shortly to confirm the details.`,
-      duration: 5000, // Make toast last a bit longer
-    });
+    const newAppointment: Appointment = {
+      id: Date.now().toString(),
+      doctorId: doctor.id,
+      doctorName: doctor.name,
+      doctorSpecialty: doctor.specialty,
+      status: "Pending Confirmation",
+      requestedAt: new Date().toISOString(),
+    };
+
+    try {
+      const existingAppointmentsRaw = localStorage.getItem(APPOINTMENTS_STORAGE_KEY);
+      const existingAppointments: Appointment[] = existingAppointmentsRaw ? JSON.parse(existingAppointmentsRaw) : [];
+      existingAppointments.push(newAppointment);
+      localStorage.setItem(APPOINTMENTS_STORAGE_KEY, JSON.stringify(existingAppointments));
+      
+      // Dispatch a storage event so other tabs/components can react if needed
+      window.dispatchEvent(new Event('storage'));
+
+      toast({
+        title: "Appointment Request Sent!",
+        description: `Your request to book an appointment with ${doctor.name} has been sent. We will contact you shortly to confirm the details. You can view its status on your dashboard.`,
+        duration: 7000,
+      });
+    } catch (error) {
+      console.error("Failed to save appointment to localStorage", error);
+      toast({
+        title: "Booking Error",
+        description: "Could not save your appointment request. Please try again.",
+        variant: "destructive",
+      });
+    }
     setIsDialogOpen(false);
   };
 
