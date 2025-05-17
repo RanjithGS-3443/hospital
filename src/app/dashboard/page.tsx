@@ -64,7 +64,7 @@ export default function DashboardPage() {
         const instance = new SpeechRecognitionAPI();
         instance.continuous = false;
         instance.interimResults = false;
-        instance.lang = 'en-US';
+        instance.lang = 'kn-IN'; // Set language to Kannada
         recognitionRef.current = instance;
       } else {
         setSpeechRecognitionSupported(false);
@@ -149,13 +149,17 @@ export default function DashboardPage() {
     if (!speechSynthesisRef.current || !speechSynthesisSupported || !text) return;
     speechSynthesisRef.current.cancel(); // Cancel any previous speech
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'en-US';
+    utterance.lang = 'kn-IN'; // Set language to Kannada for speech output
     utterance.onstart = () => setIsSpeaking(true);
     utterance.onend = () => setIsSpeaking(false);
     utterance.onerror = (event) => {
       console.error("Speech synthesis error", event);
       setIsSpeaking(false);
-      toast({ title: "Speech Error", description: "Could not speak the response.", variant: "destructive" });
+      let errorDescription = "Could not speak the response.";
+      if (event.error === 'language-unavailable' || event.error === 'voice-unavailable') {
+        errorDescription = "Kannada voice is not available on your browser/system. Response cannot be spoken in Kannada.";
+      }
+      toast({ title: "Speech Error", description: errorDescription, variant: "destructive" });
     };
     speechSynthesisRef.current.speak(utterance);
   }, [speechSynthesisSupported, toast]);
@@ -186,9 +190,7 @@ export default function DashboardPage() {
     try {
       const suggestions = await getAISuggestions(currentData);
       setAiSuggestions(suggestions);
-      if (suggestions.suggestedServices) {
-        speakText(suggestions.suggestedServices);
-      }
+      // Speech synthesis will be triggered by the useEffect below
       toast({
         title: "Suggestions Ready",
         description: "AI has provided some recommendations.",
@@ -236,18 +238,16 @@ export default function DashboardPage() {
       setVoiceTranscript(transcript);
       form.setValue('appointmentDetails', transcript, { shouldValidate: true }); // Update form field
       
-      // Prepare data for AI suggestions using current form values for name/contact
       const name = form.getValues('name');
       const contactDetails = form.getValues('contactDetails');
 
       if (!name || !contactDetails) {
-        toast({title: "Missing Details", description: "Please ensure your name and contact details are filled in the form before using voice input for appointment details.", variant: "destructive"});
-        if (!name) form.setError("name", { type: "manual", message: "Name is required for voice assistance." });
-        if (!contactDetails) form.setError("contactDetails", { type: "manual", message: "Contact details are required for voice assistance." });
+        toast({title: "ಮಾಹಿತಿ ಕಾಣೆಯಾಗಿದೆ", description: "ದಯವಿಟ್ಟು ನಿಮ್ಮ ಹೆಸರು ಮತ್ತು ಸಂಪರ್ಕ ವಿವರಗಳನ್ನು ನಮೂದಿಸಿ ನಂತರ ಧ್ವನಿ ಇನ್‌ಪುಟ್ ಬಳಸಿ.", variant: "destructive"});
+        if (!name) form.setError("name", { type: "manual", message: "ಧ್ವನಿ ಸಹಾಯಕ್ಕಾಗಿ ಹೆಸರು ಅಗತ್ಯವಿದೆ." });
+        if (!contactDetails) form.setError("contactDetails", { type: "manual", message: "ಧ್ವನಿ ಸಹಾಯಕ್ಕಾಗಿ ಸಂಪರ್ಕ ವಿವರಗಳು ಅಗತ್ಯವಿದೆ." });
         setIsListening(false);
         return;
       }
-      // Update submittedData so the confirmation card shows the voice input
       const voiceInputData = { name, contactDetails, appointmentDetails: transcript };
       setSubmittedData(voiceInputData); 
       handleGetAssistance(voiceInputData);
@@ -255,12 +255,13 @@ export default function DashboardPage() {
 
     recognitionRef.current.onerror = (event) => {
       console.error("Speech recognition error", event.error);
-      let errorMsg = "An error occurred during speech recognition.";
-      if (event.error === 'no-speech') errorMsg = "No speech was detected. Please try again.";
-      if (event.error === 'audio-capture') errorMsg = "Audio capture failed. Please check your microphone.";
-      if (event.error === 'not-allowed') errorMsg = "Microphone access denied. Please enable microphone permissions.";
+      let errorMsg = "ಧ್ವನಿ ಗುರುತಿಸುವಿಕೆ ಸಮಯದಲ್ಲಿ ದೋಷ ಕಂಡುಬಂದಿದೆ.";
+      if (event.error === 'no-speech') errorMsg = "ಯಾವುದೇ ಧ್ವನಿ ಪತ್ತೆಯಾಗಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.";
+      if (event.error === 'audio-capture') errorMsg = "ಆಡಿಯೋ ಸೆರೆಹಿಡಿಯುವಿಕೆ ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು ನಿಮ್ಮ ಮೈಕ್ರೊಫೋನ್ ಪರಿಶೀಲಿಸಿ.";
+      if (event.error === 'not-allowed') errorMsg = "ಮೈಕ್ರೊಫೋನ್ ಪ್ರವೇಶವನ್ನು ನಿರಾಕರಿಸಲಾಗಿದೆ. ದಯವಿಟ್ಟು ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿಗಳನ್ನು ಸಕ್ರಿಯಗೊಳಿಸಿ.";
+      if (event.error === 'language-not-supported') errorMsg = "ಕನ್ನಡ ಭಾಷೆ ಈ ಬ್ರೌಸರ್‌ನಲ್ಲಿ ಧ್ವನಿ ಗುರುತಿಸುವಿಕೆಗೆ ಬೆಂಬಲಿತವಾಗಿಲ್ಲ.";
       setVoiceError(errorMsg);
-      toast({ title: "Voice Input Error", description: errorMsg, variant: "destructive" });
+      toast({ title: "ಧ್ವನಿ ಇನ್‌ಪುಟ್ ದೋಷ", description: errorMsg, variant: "destructive" });
       setIsListening(false);
     };
 
@@ -361,7 +362,7 @@ export default function DashboardPage() {
               <CardTitle className="flex items-center gap-2 text-xl md:text-2xl text-primary">
                 <ClipboardEdit className="h-6 w-6" /> Patient Information
               </CardTitle>
-              <CardDescription>Enter patient details. You can also use voice input for the 'Reason for Visit' after filling name and contact.</CardDescription>
+              <CardDescription>Enter patient details. You can also use voice input (Kannada supported) for the 'Reason for Visit' after filling name and contact.</CardDescription>
             </CardHeader>
             <CardContent>
               <Form {...form}>
@@ -405,24 +406,31 @@ export default function DashboardPage() {
                       </FormItem>
                     )}
                   />
-                  <div className="flex flex-col sm:flex-row gap-2 items-center">
-                    <Button type="submit" className="w-full sm:w-auto" disabled={isSubmittingInfo}>
-                      {isSubmittingInfo ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                      Save/Update Information
-                    </Button>
-                     <Button 
-                        type="button" 
-                        variant="outline" 
-                        onClick={toggleListening} 
-                        className="w-full sm:w-auto" 
-                        disabled={!speechRecognitionSupported || isSubmittingInfo || isFetchingSuggestions}
-                        title={!speechRecognitionSupported ? "Speech recognition not supported by your browser" : (isListening ? "Stop listening" : "Start voice input for 'Reason for Visit'")}
-                      >
-                        {isListening ? <MicOff className="mr-2 h-4 w-4 text-red-500" /> : <Mic className="mr-2 h-4 w-4" />}
-                        {isListening ? 'Listening...' : 'Voice Input for Visit Reason'}
-                      </Button>
+                  <div className="flex flex-col sm:flex-row gap-2 items-start">
+                     <div>
+                        <Button type="submit" className="w-full sm:w-auto" disabled={isSubmittingInfo}>
+                        {isSubmittingInfo ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                        Save/Update Information
+                        </Button>
+                    </div>
+                    <div className="w-full sm:w-auto">
+                        <Button 
+                            type="button" 
+                            variant="outline" 
+                            onClick={toggleListening} 
+                            className="w-full" 
+                            disabled={!speechRecognitionSupported || isSubmittingInfo || isFetchingSuggestions}
+                            title={!speechRecognitionSupported ? "Speech recognition not supported by your browser" : (isListening ? "Stop listening" : "Start voice input for 'Reason for Visit' (Kannada enabled)")}
+                        >
+                            {isListening ? <MicOff className="mr-2 h-4 w-4 text-red-500" /> : <Mic className="mr-2 h-4 w-4" />}
+                            {isListening ? 'ಕೇಳಲಾಗುತ್ತಿದೆ...' : 'ಧ್ವನಿ ಇನ್‌ಪುಟ್ (ಭೇಟಿ ಕಾರಣ)'}
+                        </Button>
+                         <p className="text-xs text-muted-foreground mt-1">
+                            ಕನ್ನಡ (ಕನ್ನಡ) ಧ್ವನಿ ಬೆಂಬಲಿತವಾಗಿದೆ. AI ಪ್ರತಿಕ್ರಿಯೆಗಳು ಇಂಗ್ಲಿಷ್‌ನಲ್ಲಿರಬಹುದು.
+                        </p>
+                    </div>
                   </div>
-                  {!speechRecognitionSupported && <p className="text-xs text-destructive mt-2">Voice input is not supported by your browser.</p>}
+                  {!speechRecognitionSupported && <p className="text-xs text-destructive mt-2">ನಿಮ್ಮ ಬ್ರೌಸರ್‌ನಿಂದ ಧ್ವನಿ ಇನ್‌ಪುಟ್ ಬೆಂಬಲಿತವಾಗಿಲ್ಲ.</p>}
                 </form>
               </Form>
             </CardContent>
@@ -432,7 +440,7 @@ export default function DashboardPage() {
             <Card className="shadow-sm border-blue-500">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-lg text-blue-600">
-                  <MessagesSquare className="h-5 w-5" /> Last Voice Input
+                  <MessagesSquare className="h-5 w-5" /> Last Voice Input (ಕೊನೆಯ ಧ್ವನಿ ಇನ್‌ಪುಟ್)
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -496,7 +504,7 @@ export default function DashboardPage() {
                   <Sparkles className="h-6 w-6" /> AI Suggested Services
                    {isSpeaking && <Volume2 className="h-5 w-5 ml-2 text-blue-500 animate-pulse" />}
                 </CardTitle>
-                <CardDescription>Based on the provided information, here are some relevant services and information. {speechSynthesisSupported && !isSpeaking && aiSuggestions.suggestedServices && <Button variant="link" size="sm" className="p-0 h-auto" onClick={() => speakText(aiSuggestions.suggestedServices!)}>Speak again</Button>}</CardDescription>
+                <CardDescription>Based on the provided information, here are some relevant services and information. {speechSynthesisSupported && !isSpeaking && aiSuggestions.suggestedServices && <Button variant="link" size="sm" className="p-0 h-auto" onClick={() => speakText(aiSuggestions.suggestedServices!)}>Speak again (ಮತ್ತೆ ಮಾತನಾಡಿ)</Button>}</CardDescription>
               </CardHeader>
               <CardContent>
                 {aiSuggestions.suggestedServices ? (
