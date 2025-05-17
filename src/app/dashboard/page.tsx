@@ -77,7 +77,7 @@ export default function DashboardPage() {
     defaultValues: {
       name: "",
       contactDetails: "",
-      appointmentDetails: "", // This will be for general AI suggestions, not voice booking
+      appointmentDetails: "", 
     },
   });
 
@@ -164,9 +164,9 @@ export default function DashboardPage() {
 
   const handleInfoSubmit: SubmitHandler<PatientInfoFormData> = async (data) => {
     setIsSubmittingInfo(true);
-    setSubmittedData(data); // Save form data for potential AI suggestions
-    setAiSuggestions(null); // Clear previous suggestions
-    setVoiceBookingResponse(null); // Clear previous voice booking responses
+    setSubmittedData(data); 
+    setAiSuggestions(null); 
+    setVoiceBookingResponse(null); 
     toast({
       title: "Information Updated",
       description: "Your details have been updated. You can now get AI assistance for suggestions.",
@@ -217,11 +217,11 @@ export default function DashboardPage() {
 
     setIsFetchingSuggestions(true);
     setAiSuggestions(null);
-    setVoiceBookingResponse(null); // Clear voice booking response
+    setVoiceBookingResponse(null); 
     try {
       const aiInput: SuggestServicesInput = {
         ...currentData,
-        language: selectedVoiceLanguage, // Use selected language for suggestions too
+        language: selectedVoiceLanguage, 
       };
       const suggestions = await getAISuggestions(aiInput);
       setAiSuggestions(suggestions);
@@ -265,8 +265,8 @@ export default function DashboardPage() {
       existingAppointments.push(newAppointment);
       localStorage.setItem(APPOINTMENTS_STORAGE_KEY, JSON.stringify(existingAppointments));
       
-      window.dispatchEvent(new Event('storage')); // To update appointment list
-      loadAppointments(); // Reload appointments immediately
+      window.dispatchEvent(new Event('storage')); 
+      loadAppointments(); 
 
       toast({
         title: "Appointment Request Sent!",
@@ -306,7 +306,7 @@ export default function DashboardPage() {
     recognitionRef.current.onresult = async (event) => {
       const transcript = event.results[0][0].transcript;
       setLastVoiceTranscript(transcript);
-      form.setValue('appointmentDetails', ""); // Clear general details field as voice is for booking now
+      form.setValue('appointmentDetails', ""); 
       
       setIsProcessingVoiceBooking(true);
       try {
@@ -315,7 +315,6 @@ export default function DashboardPage() {
         
         if (bookingResult.bookedDoctorId && !bookingResult.isError) {
           saveAppointmentToLocalStorage(bookingResult.bookedDoctorId);
-          // The toast from saveAppointmentToLocalStorage will cover this
         } else {
            toast({
             title: bookingResult.isError ? "Booking Issue" : "Voice Booking",
@@ -335,22 +334,54 @@ export default function DashboardPage() {
       setIsProcessingVoiceBooking(false);
     };
 
-    recognitionRef.current.onerror = (event) => {
-      console.error("Speech recognition error", event.error);
-      let errorMsg = `An error occurred during voice recognition for ${selectedLangLabel}.`;
-      if (event.error === 'no-speech') errorMsg = `No speech detected for ${selectedLangLabel}. Please try again.`;
-      if (event.error === 'audio-capture') errorMsg = "Audio capture failed. Please check your microphone.";
-      if (event.error === 'not-allowed') errorMsg = "Microphone access denied. Please enable microphone permissions.";
-      if (event.error === 'language-not-supported') errorMsg = `${selectedLangLabel} is not supported for voice recognition in this browser.`;
-      setVoiceError(errorMsg);
-      toast({ title: "Voice Input Error", description: errorMsg, variant: "destructive" });
+    recognitionRef.current.onerror = (event: SpeechRecognitionErrorEvent) => {
+      const errorType = event.error;
+      // Log detailed error information for debugging
+      console.error("Speech recognition error details:", {
+        error: errorType,
+        message: (event as any).message, // event.message is not standard but some browsers provide it
+        selectedLang: selectedVoiceLanguage,
+        fullEvent: event,
+      });
+
+      let title = "Voice Input Error";
+      let description = `An unexpected error occurred during voice recognition for ${selectedLangLabel}.`;
+
+      switch (errorType) {
+        case 'no-speech':
+          description = `No speech was detected for ${selectedLangLabel}. Please ensure your microphone is active, speak clearly after the '${listeningStateLabel}' prompt, and try again.`;
+          break;
+        case 'audio-capture':
+          description = `Could not capture audio for ${selectedLangLabel}. Please check your microphone connection and browser permissions.`;
+          break;
+        case 'not-allowed':
+          description = `Microphone access was denied for ${selectedLangLabel}. Please enable microphone permissions in your browser settings.`;
+          break;
+        case 'language-not-supported':
+          description = `${selectedLangLabel} voice recognition is not currently supported by your browser. You might try a different browser or language.`;
+          break;
+        case 'network':
+          description = `A network error occurred during voice recognition for ${selectedLangLabel}. Please check your internet connection.`;
+          break;
+        case 'aborted':
+          description = `Voice input for ${selectedLangLabel} was stopped. If this was unintentional, please try again.`;
+          break;
+        case 'service-not-allowed':
+           description = `The speech recognition service is not allowed for ${selectedLangLabel}, possibly due to browser or system policy.`;
+           break;
+        default:
+          description = `An unknown error (${errorType}) occurred during voice recognition for ${selectedLangLabel}. Please try again.`;
+      }
+      
+      setVoiceError(description); 
+      toast({ title, description, variant: "destructive" });
+      
       setIsListening(false);
       setIsProcessingVoiceBooking(false);
     };
 
     recognitionRef.current.onend = () => {
       setIsListening(false);
-      //setIsProcessingVoiceBooking(false); // Handled in onresult/onerror
     };
 
     recognitionRef.current.start();
