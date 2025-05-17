@@ -45,11 +45,16 @@ const prompt = ai.definePrompt({
   input: {schema: BookAppointmentInputSchema},
   output: {schema: BookAppointmentOutputSchema},
   prompt: `You are a helpful hospital appointment booking assistant.
-Your task is to understand the user's voice transcript and book an appointment with one of the available doctors.
-You MUST respond in the language specified by the 'language' code.
-- If 'kn-IN', respond in Kannada.
-- If 'hi-IN', respond in Hindi.
-- If 'en-US' or if the language code is not recognized or provided, respond in English.
+Your CRITICAL task is to generate your 'bookingConfirmationMessage' in the language specified by the 'language' input field.
+
+{{#if language}}
+The 'language' code provided is '{{{language}}}'.
+- If '{{{language}}}' is 'kn-IN', your ENTIRE 'bookingConfirmationMessage' MUST be in Kannada.
+- If '{{{language}}}' is 'hi-IN', your ENTIRE 'bookingConfirmationMessage' MUST be in Hindi.
+- If '{{{language}}}' is 'en-US', or if the code is not recognized, your ENTIRE 'bookingConfirmationMessage' MUST be in English.
+{{else}}
+No 'language' code was provided. Therefore, your ENTIRE 'bookingConfirmationMessage' MUST be in English.
+{{/if}}
 
 User's voice transcript: "{{{voiceTranscript}}}"
 
@@ -63,18 +68,18 @@ Instructions:
 2. Match the identified doctor with the list of "Available doctors".
 3. If a unique doctor is clearly identified:
     - Set 'bookedDoctorId' to the ID of that doctor.
-    - Craft a 'bookingConfirmationMessage' confirming the appointment request with that doctor (e.g., "Okay, I've requested an appointment with Dr. [Doctor Name]. You'll be contacted for confirmation.").
+    - Craft a 'bookingConfirmationMessage' confirming the appointment request with that doctor. This message MUST be in the specified language.
     - Set 'isError' to false.
 4. If the requested doctor cannot be found in the "Available doctors" list, or if the request is ambiguous (e.g., multiple doctors match a general specialty and no name is given):
     - Do NOT set 'bookedDoctorId'.
-    - Craft a 'bookingConfirmationMessage' explaining the issue (e.g., "Sorry, I couldn't find a doctor matching your request. Please try again with a specific doctor name or specialty from our list." or "We have multiple doctors in that specialty. Could you please specify the doctor's name?").
+    - Craft a 'bookingConfirmationMessage' explaining the issue. This message MUST be in the specified language.
     - Set 'isError' to true.
 5. If the transcript is too vague or doesn't seem like an appointment request:
     - Do NOT set 'bookedDoctorId'.
-    - Craft a 'bookingConfirmationMessage' asking for clarification (e.g., "I'm sorry, I didn't understand that. Could you please rephrase your appointment request?").
+    - Craft a 'bookingConfirmationMessage' asking for clarification. This message MUST be in the specified language.
     - Set 'isError' to true.
 
-Ensure your 'bookingConfirmationMessage' is helpful and in the correct language.
+Ensure your 'bookingConfirmationMessage' is helpful and adheres STRICTLY to the language requirement determined above.
 `,
 });
 
@@ -95,3 +100,4 @@ const bookAppointmentFlow = ai.defineFlow(
     return output!;
   }
 );
+

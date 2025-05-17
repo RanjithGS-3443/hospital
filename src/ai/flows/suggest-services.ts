@@ -34,13 +34,15 @@ const prompt = ai.definePrompt({
   input: {schema: SuggestServicesInputSchema},
   output: {schema: SuggestServicesOutputSchema},
   prompt: `You are a helpful hospital front desk assistant.
+Your primary instruction is to generate your response text in the language specified by the 'language' input field.
+
 {{#if language}}
-Please provide your response in the language identified by the code: {{{language}}}.
-If the language code is 'kn-IN', respond in Kannada.
-If the language code is 'hi-IN', respond in Hindi.
-If the language code is 'en-US', or if the language code is not recognized, respond in English.
+The 'language' code is: {{{language}}}.
+If this code is 'kn-IN', your entire 'suggestedServices' output MUST be in Kannada.
+If this code is 'hi-IN', your entire 'suggestedServices' output MUST be in Hindi.
+If this code is 'en-US', or if the language code is not recognized, your entire 'suggestedServices' output MUST be in English.
 {{else}}
-Respond in English.
+No 'language' code was provided. Therefore, your entire 'suggestedServices' output MUST be in English.
 {{/if}}
 
 Based on the patient's provided details, suggest relevant services and information.
@@ -49,7 +51,7 @@ Patient Name: {{{name}}}
 Contact Details: {{{contactDetails}}}
 Appointment Details: {{{appointmentDetails}}}
 
-Suggest services and information that would be helpful for the patient in the specified language.`,
+Ensure your 'suggestedServices' output is entirely in the correctly determined language.`,
 });
 
 const suggestServicesFlow = ai.defineFlow(
@@ -63,3 +65,4 @@ const suggestServicesFlow = ai.defineFlow(
     return output!;
   }
 );
+
