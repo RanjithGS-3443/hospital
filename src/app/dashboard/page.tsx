@@ -179,8 +179,8 @@ export default function DashboardPage() {
 
     utterance.onstart = () => setIsSpeaking(true);
     utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = (event) => {
-      console.error("Speech synthesis error", event);
+    utterance.onerror = (event: SpeechSynthesisErrorEvent) => {
+      console.error("Speech synthesis error details:", { error: event.error, fullEvent: event });
       setIsSpeaking(false);
       let errorDescription = "Could not speak the response.";
       if (event.error === 'language-unavailable' || event.error === 'voice-unavailable') {
@@ -655,5 +655,7 @@ export default function DashboardPage() {
     </div>
   );
 }
+
+    
 
     
