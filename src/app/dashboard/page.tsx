@@ -12,6 +12,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { useAuth } from '@/hooks/use-auth';
 import { Logo } from '@/components/logo';
 import { useToast } from '@/hooks/use-toast';
@@ -19,11 +20,29 @@ import { patientInfoSchema, type PatientInfoFormData } from '@/lib/schemas';
 import { getAISuggestions } from './actions';
 import type { SuggestServicesOutput } from '@/ai/flows/suggest-services';
 import type { Appointment } from '@/lib/types';
-import { Loader2, LogOut, UserCircle, Phone, ClipboardEdit, Sparkles, CheckCircle2, AlertTriangle, Users, ListChecks, ClockIcon, CalendarX2, ThumbsUp, XCircle, Mic, MicOff, Volume2, MessagesSquare } from 'lucide-react';
+import { Loader2, LogOut, UserCircle, Phone, ClipboardEdit, Sparkles, CheckCircle2, AlertTriangle, Users, ListChecks, ClockIcon, CalendarX2, ThumbsUp, XCircle, Mic, MicOff, Volume2, MessagesSquare, Languages } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 
 const APPOINTMENTS_STORAGE_KEY = 'healthdesk.appointments';
+
+const voiceLanguages = [
+  { value: 'en-US', label: 'English (US)', shortLabel: 'English' },
+  { value: 'kn-IN', label: 'ಕನ್ನಡ (Kannada)', shortLabel: 'Kannada' },
+  { value: 'hi-IN', label: 'हिन्दी (Hindi)', shortLabel: 'Hindi' },
+];
+
+interface VoiceButtonLabels {
+  default: string;
+  listening: string;
+}
+
+const voiceButtonLabelsMap: Record<string, VoiceButtonLabels> = {
+  'en-US': { default: 'Voice Input (Reason for Visit)', listening: 'Listening...' },
+  'kn-IN': { default: 'ಧ್ವನಿ ಇನ್‌ಪುಟ್ (ಭೇಟಿ ಕಾರಣ)', listening: 'ಕೇಳಲಾಗುತ್ತಿದೆ...' },
+  'hi-IN': { default: 'वॉइस इनपुट (विजिट का कारण)', listening: 'सुन रहा है...' },
+};
+
 
 export default function DashboardPage() {
   const { user, logout, isLoading: authLoading } = useAuth();
@@ -37,6 +56,9 @@ export default function DashboardPage() {
   const [myAppointments, setMyAppointments] = useState<Appointment[]>([]);
 
   // Voice Assistant State
+  const [selectedVoiceLanguage, setSelectedVoiceLanguage] = useState<string>(voiceLanguages[0].value);
+  const [voiceButtonLabel, setVoiceButtonLabel] = useState<string>(voiceButtonLabelsMap[voiceLanguages[0].value].default);
+  const [listeningStateLabel, setListeningStateLabel] = useState<string>(voiceButtonLabelsMap[voiceLanguages[0].value].listening);
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
   const [voiceTranscript, setVoiceTranscript] = useState<string | null>(null);
@@ -57,6 +79,12 @@ export default function DashboardPage() {
   });
 
   useEffect(() => {
+    const currentLabels = voiceButtonLabelsMap[selectedVoiceLanguage] || voiceButtonLabelsMap['en-US'];
+    setVoiceButtonLabel(currentLabels.default);
+    setListeningStateLabel(currentLabels.listening);
+  }, [selectedVoiceLanguage]);
+
+  useEffect(() => {
     if (typeof window !== 'undefined') {
       const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
       if (SpeechRecognitionAPI) {
@@ -64,7 +92,7 @@ export default function DashboardPage() {
         const instance = new SpeechRecognitionAPI();
         instance.continuous = false;
         instance.interimResults = false;
-        instance.lang = 'kn-IN'; // Set language to Kannada
+        // instance.lang will be set dynamically
         recognitionRef.current = instance;
       } else {
         setSpeechRecognitionSupported(false);
@@ -74,7 +102,6 @@ export default function DashboardPage() {
       if ('speechSynthesis' in window) {
         setSpeechSynthesisSupported(true);
         speechSynthesisRef.current = window.speechSynthesis;
-        // Clear any pending utterances on page load/refresh
         speechSynthesisRef.current.cancel(); 
       } else {
         setSpeechSynthesisSupported(false);
@@ -114,7 +141,7 @@ export default function DashboardPage() {
     if (user?.name) {
       form.setValue('name', user.name);
     }
-     if (user?.email && !form.getValues('contactDetails')) { // Only if contact details are empty
+     if (user?.email && !form.getValues('contactDetails')) { 
       form.setValue('contactDetails', user.email);
     }
   }, [user, form]);
@@ -136,8 +163,6 @@ export default function DashboardPage() {
   const handleInfoSubmit: SubmitHandler<PatientInfoFormData> = async (data) => {
     setIsSubmittingInfo(true);
     setSubmittedData(data);
-    // Do not clear AI suggestions if they were from voice input just prior
-    // setAiSuggestions(null); 
     toast({
       title: "Information Updated",
       description: "Your details have been updated. You can now get AI assistance.",
@@ -147,9 +172,11 @@ export default function DashboardPage() {
   
   const speakText = useCallback((text: string) => {
     if (!speechSynthesisRef.current || !speechSynthesisSupported || !text) return;
-    speechSynthesisRef.current.cancel(); // Cancel any previous speech
+    speechSynthesisRef.current.cancel(); 
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = 'kn-IN'; // Set language to Kannada for speech output
+    utterance.lang = selectedVoiceLanguage; 
+    const selectedLangLabel = voiceLanguages.find(l => l.value === selectedVoiceLanguage)?.label || selectedVoiceLanguage;
+
     utterance.onstart = () => setIsSpeaking(true);
     utterance.onend = () => setIsSpeaking(false);
     utterance.onerror = (event) => {
@@ -157,12 +184,14 @@ export default function DashboardPage() {
       setIsSpeaking(false);
       let errorDescription = "Could not speak the response.";
       if (event.error === 'language-unavailable' || event.error === 'voice-unavailable') {
-        errorDescription = "Kannada voice is not available on your browser/system. Response cannot be spoken in Kannada.";
+        errorDescription = `The selected voice (${selectedLangLabel}) is not available on your browser/system. Response cannot be spoken in this language.`;
+      } else if (event.error === 'not-allowed') {
+        errorDescription = "Speech synthesis was not allowed. Please check browser permissions.";
       }
       toast({ title: "Speech Error", description: errorDescription, variant: "destructive" });
     };
     speechSynthesisRef.current.speak(utterance);
-  }, [speechSynthesisSupported, toast]);
+  }, [speechSynthesisSupported, toast, selectedVoiceLanguage]);
 
 
   const handleGetAssistance = async (dataToProcess?: PatientInfoFormData) => {
@@ -170,8 +199,7 @@ export default function DashboardPage() {
 
     if (!currentData.name || !currentData.contactDetails || !currentData.appointmentDetails) {
       toast({ title: "Missing Information", description: "Please ensure name, contact, and appointment details are provided.", variant: "destructive" });
-      if (!submittedData && !dataToProcess) { // If form not submitted and not from voice
-         // Highlight missing fields
+      if (!submittedData && !dataToProcess) { 
         if (!currentData.name) form.setError("name", { type: "manual", message: "Name is required." });
         if (!currentData.contactDetails) form.setError("contactDetails", { type: "manual", message: "Contact details are required." });
         if (!currentData.appointmentDetails) form.setError("appointmentDetails", { type: "manual", message: "Appointment details are required." });
@@ -179,18 +207,16 @@ export default function DashboardPage() {
       return;
     }
 
-    // If data is coming directly from form submission (not voice), ensure it's set to submittedData
     if (!dataToProcess && form.formState.isValid) {
         setSubmittedData(form.getValues());
     }
 
-
     setIsFetchingSuggestions(true);
     setAiSuggestions(null);
     try {
+      // The AI flow input doesn't currently take language, it will respond in its default (likely English)
       const suggestions = await getAISuggestions(currentData);
       setAiSuggestions(suggestions);
-      // Speech synthesis will be triggered by the useEffect below
       toast({
         title: "Suggestions Ready",
         description: "AI has provided some recommendations.",
@@ -207,10 +233,8 @@ export default function DashboardPage() {
     setIsFetchingSuggestions(false);
   };
   
-  // Effect to speak when AI suggestions are updated
   useEffect(() => {
     if (aiSuggestions?.suggestedServices && speechSynthesisSupported && !isFetchingSuggestions) {
-      // Only speak if not already speaking from a previous request
       if (speechSynthesisRef.current && !speechSynthesisRef.current.speaking) {
          speakText(aiSuggestions.suggestedServices);
       }
@@ -224,27 +248,31 @@ export default function DashboardPage() {
       return;
     }
     if (isSpeaking && speechSynthesisRef.current) {
-      speechSynthesisRef.current.cancel(); // Stop speaking if user wants to talk
+      speechSynthesisRef.current.cancel(); 
       setIsSpeaking(false);
     }
 
     setIsListening(true);
     setVoiceTranscript(null);
     setVoiceError(null);
-    setAiSuggestions(null); // Clear previous AI suggestions
+    setAiSuggestions(null); 
+
+    recognitionRef.current.lang = selectedVoiceLanguage;
+    const selectedLangLabel = voiceLanguages.find(l => l.value === selectedVoiceLanguage)?.label || selectedVoiceLanguage;
+
 
     recognitionRef.current.onresult = (event) => {
       const transcript = event.results[0][0].transcript;
       setVoiceTranscript(transcript);
-      form.setValue('appointmentDetails', transcript, { shouldValidate: true }); // Update form field
+      form.setValue('appointmentDetails', transcript, { shouldValidate: true }); 
       
       const name = form.getValues('name');
       const contactDetails = form.getValues('contactDetails');
 
       if (!name || !contactDetails) {
-        toast({title: "ಮಾಹಿತಿ ಕಾಣೆಯಾಗಿದೆ", description: "ದಯವಿಟ್ಟು ನಿಮ್ಮ ಹೆಸರು ಮತ್ತು ಸಂಪರ್ಕ ವಿವರಗಳನ್ನು ನಮೂದಿಸಿ ನಂತರ ಧ್ವನಿ ಇನ್‌ಪುಟ್ ಬಳಸಿ.", variant: "destructive"});
-        if (!name) form.setError("name", { type: "manual", message: "ಧ್ವನಿ ಸಹಾಯಕ್ಕಾಗಿ ಹೆಸರು ಅಗತ್ಯವಿದೆ." });
-        if (!contactDetails) form.setError("contactDetails", { type: "manual", message: "ಧ್ವನಿ ಸಹಾಯಕ್ಕಾಗಿ ಸಂಪರ್ಕ ವಿವರಗಳು ಅಗತ್ಯವಿದೆ." });
+        toast({title: "Information Missing", description: "Please enter your name and contact details before using voice input.", variant: "destructive"});
+        if (!name) form.setError("name", { type: "manual", message: "Name is required for voice assistance." });
+        if (!contactDetails) form.setError("contactDetails", { type: "manual", message: "Contact details are required for voice assistance." });
         setIsListening(false);
         return;
       }
@@ -255,13 +283,13 @@ export default function DashboardPage() {
 
     recognitionRef.current.onerror = (event) => {
       console.error("Speech recognition error", event.error);
-      let errorMsg = "ಧ್ವನಿ ಗುರುತಿಸುವಿಕೆ ಸಮಯದಲ್ಲಿ ದೋಷ ಕಂಡುಬಂದಿದೆ.";
-      if (event.error === 'no-speech') errorMsg = "ಯಾವುದೇ ಧ್ವನಿ ಪತ್ತೆಯಾಗಿಲ್ಲ. ದಯವಿಟ್ಟು ಮತ್ತೆ ಪ್ರಯತ್ನಿಸಿ.";
-      if (event.error === 'audio-capture') errorMsg = "ಆಡಿಯೋ ಸೆರೆಹಿಡಿಯುವಿಕೆ ವಿಫಲವಾಗಿದೆ. ದಯವಿಟ್ಟು ನಿಮ್ಮ ಮೈಕ್ರೊಫೋನ್ ಪರಿಶೀಲಿಸಿ.";
-      if (event.error === 'not-allowed') errorMsg = "ಮೈಕ್ರೊಫೋನ್ ಪ್ರವೇಶವನ್ನು ನಿರಾಕರಿಸಲಾಗಿದೆ. ದಯವಿಟ್ಟು ಮೈಕ್ರೊಫೋನ್ ಅನುಮತಿಗಳನ್ನು ಸಕ್ರಿಯಗೊಳಿಸಿ.";
-      if (event.error === 'language-not-supported') errorMsg = "ಕನ್ನಡ ಭಾಷೆ ಈ ಬ್ರೌಸರ್‌ನಲ್ಲಿ ಧ್ವನಿ ಗುರುತಿಸುವಿಕೆಗೆ ಬೆಂಬಲಿತವಾಗಿಲ್ಲ.";
+      let errorMsg = `An error occurred during voice recognition for ${selectedLangLabel}.`;
+      if (event.error === 'no-speech') errorMsg = `No speech detected for ${selectedLangLabel}. Please try again.`;
+      if (event.error === 'audio-capture') errorMsg = "Audio capture failed. Please check your microphone.";
+      if (event.error === 'not-allowed') errorMsg = "Microphone access denied. Please enable microphone permissions.";
+      if (event.error === 'language-not-supported') errorMsg = `${selectedLangLabel} is not supported for voice recognition in this browser.`;
       setVoiceError(errorMsg);
-      toast({ title: "ಧ್ವನಿ ಇನ್‌ಪುಟ್ ದೋಷ", description: errorMsg, variant: "destructive" });
+      toast({ title: "Voice Input Error", description: errorMsg, variant: "destructive" });
       setIsListening(false);
     };
 
@@ -335,6 +363,9 @@ export default function DashboardPage() {
       </div>
     );
   }
+  
+  const currentSelectedLanguageLabel = voiceLanguages.find(l => l.value === selectedVoiceLanguage)?.shortLabel || 'Voice';
+
 
   return (
     <div className="flex min-h-screen flex-col bg-background">
@@ -362,7 +393,7 @@ export default function DashboardPage() {
               <CardTitle className="flex items-center gap-2 text-xl md:text-2xl text-primary">
                 <ClipboardEdit className="h-6 w-6" /> Patient Information
               </CardTitle>
-              <CardDescription>Enter patient details. You can also use voice input (Kannada supported) for the 'Reason for Visit' after filling name and contact.</CardDescription>
+              <CardDescription>Enter patient details. You can use voice input for 'Reason for Visit' after filling name/contact and selecting a language below.</CardDescription>
             </CardHeader>
             <CardContent>
               <Form {...form}>
@@ -406,31 +437,40 @@ export default function DashboardPage() {
                       </FormItem>
                     )}
                   />
-                  <div className="flex flex-col sm:flex-row gap-2 items-start">
-                     <div>
-                        <Button type="submit" className="w-full sm:w-auto" disabled={isSubmittingInfo}>
+                  <div className="flex flex-col sm:flex-row gap-4 items-start">
+                     <Button type="submit" className="w-full sm:w-auto" disabled={isSubmittingInfo}>
                         {isSubmittingInfo ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
                         Save/Update Information
-                        </Button>
-                    </div>
-                    <div className="w-full sm:w-auto">
+                     </Button>
+                    <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                        <Select value={selectedVoiceLanguage} onValueChange={setSelectedVoiceLanguage}>
+                            <SelectTrigger className="w-full sm:w-[180px]" aria-label="Select voice language">
+                                <Languages className="mr-2 h-4 w-4"/>
+                                <SelectValue placeholder="Select language" />
+                            </SelectTrigger>
+                            <SelectContent>
+                                {voiceLanguages.map(lang => (
+                                    <SelectItem key={lang.value} value={lang.value}>{lang.label}</SelectItem>
+                                ))}
+                            </SelectContent>
+                        </Select>
                         <Button 
                             type="button" 
                             variant="outline" 
                             onClick={toggleListening} 
-                            className="w-full" 
+                            className="w-full sm:w-auto" 
                             disabled={!speechRecognitionSupported || isSubmittingInfo || isFetchingSuggestions}
-                            title={!speechRecognitionSupported ? "Speech recognition not supported by your browser" : (isListening ? "Stop listening" : "Start voice input for 'Reason for Visit' (Kannada enabled)")}
+                            title={!speechRecognitionSupported ? "Speech recognition not supported" : (isListening ? `Stop listening (${currentSelectedLanguageLabel})` : `Start voice input for 'Reason for Visit' (${currentSelectedLanguageLabel})`)}
                         >
                             {isListening ? <MicOff className="mr-2 h-4 w-4 text-red-500" /> : <Mic className="mr-2 h-4 w-4" />}
-                            {isListening ? 'ಕೇಳಲಾಗುತ್ತಿದೆ...' : 'ಧ್ವನಿ ಇನ್‌ಪುಟ್ (ಭೇಟಿ ಕಾರಣ)'}
+                            {isListening ? listeningStateLabel : voiceButtonLabel}
                         </Button>
-                         <p className="text-xs text-muted-foreground mt-1">
-                            ಕನ್ನಡ (ಕನ್ನಡ) ಧ್ವನಿ ಬೆಂಬಲಿತವಾಗಿದೆ. AI ಪ್ರತಿಕ್ರಿಯೆಗಳು ಇಂಗ್ಲಿಷ್‌ನಲ್ಲಿರಬಹುದು.
-                        </p>
                     </div>
                   </div>
-                  {!speechRecognitionSupported && <p className="text-xs text-destructive mt-2">ನಿಮ್ಮ ಬ್ರೌಸರ್‌ನಿಂದ ಧ್ವನಿ ಇನ್‌ಪುಟ್ ಬೆಂಬಲಿತವಾಗಿಲ್ಲ.</p>}
+                  <p className="text-xs text-muted-foreground mt-1">
+                      {currentSelectedLanguageLabel} voice input is enabled. AI responses will likely be in English but spoken in the selected language if supported.
+                  </p>
+                  {!speechRecognitionSupported && <p className="text-xs text-destructive mt-2">Voice input is not supported by your browser.</p>}
                 </form>
               </Form>
             </CardContent>
@@ -440,7 +480,7 @@ export default function DashboardPage() {
             <Card className="shadow-sm border-blue-500">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-lg text-blue-600">
-                  <MessagesSquare className="h-5 w-5" /> Last Voice Input (ಕೊನೆಯ ಧ್ವನಿ ಇನ್‌ಪುಟ್)
+                  <MessagesSquare className="h-5 w-5" /> Last Voice Input ({currentSelectedLanguageLabel})
                 </CardTitle>
               </CardHeader>
               <CardContent>
@@ -504,7 +544,13 @@ export default function DashboardPage() {
                   <Sparkles className="h-6 w-6" /> AI Suggested Services
                    {isSpeaking && <Volume2 className="h-5 w-5 ml-2 text-blue-500 animate-pulse" />}
                 </CardTitle>
-                <CardDescription>Based on the provided information, here are some relevant services and information. {speechSynthesisSupported && !isSpeaking && aiSuggestions.suggestedServices && <Button variant="link" size="sm" className="p-0 h-auto" onClick={() => speakText(aiSuggestions.suggestedServices!)}>Speak again (ಮತ್ತೆ ಮಾತನಾಡಿ)</Button>}</CardDescription>
+                <CardDescription>
+                    Based on the provided information, here are some relevant services.
+                    {speechSynthesisSupported && !isSpeaking && aiSuggestions.suggestedServices && 
+                    <Button variant="link" size="sm" className="p-0 h-auto ml-1" onClick={() => speakText(aiSuggestions.suggestedServices!)}>
+                        Speak again ({currentSelectedLanguageLabel})
+                    </Button>}
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 {aiSuggestions.suggestedServices ? (
@@ -610,3 +656,4 @@ export default function DashboardPage() {
   );
 }
 
+    
