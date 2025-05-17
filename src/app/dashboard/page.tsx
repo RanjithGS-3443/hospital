@@ -18,8 +18,8 @@ import { useToast } from '@/hooks/use-toast';
 import { patientInfoSchema, type PatientInfoFormData } from '@/lib/schemas';
 import { getAISuggestions } from './actions';
 import type { SuggestServicesOutput } from '@/ai/flows/suggest-services';
-import type { Appointment } from '@/lib/types'; // Import Appointment type
-import { Loader2, LogOut, UserCircle, Phone, ClipboardEdit, Sparkles, CheckCircle2, AlertTriangle, Users, ListChecks, ClockIcon, CalendarX2 } from 'lucide-react';
+import type { Appointment } from '@/lib/types';
+import { Loader2, LogOut, UserCircle, Phone, ClipboardEdit, Sparkles, CheckCircle2, AlertTriangle, Users, ListChecks, ClockIcon, CalendarX2, ThumbsUp, XCircle } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 
@@ -50,7 +50,6 @@ export default function DashboardPage() {
       const storedAppointments = localStorage.getItem(APPOINTMENTS_STORAGE_KEY);
       if (storedAppointments) {
         const parsedAppointments: Appointment[] = JSON.parse(storedAppointments);
-        // Sort by most recent first
         parsedAppointments.sort((a, b) => new Date(b.requestedAt).getTime() - new Date(a.requestedAt).getTime());
         setMyAppointments(parsedAppointments);
       } else {
@@ -59,8 +58,13 @@ export default function DashboardPage() {
     } catch (error) {
       console.error("Failed to load appointments from localStorage", error);
       setMyAppointments([]);
+       toast({
+        title: "Error Loading Appointments",
+        description: "Could not retrieve your appointment data. Please try refreshing.",
+        variant: "destructive",
+      });
     }
-  }, []);
+  }, [toast]);
 
   useEffect(() => {
     if (!authLoading && !user) {
@@ -76,22 +80,26 @@ export default function DashboardPage() {
 
   useEffect(() => {
     loadAppointments();
-    // Listen for storage changes to update appointments if booked in another tab
-    window.addEventListener('storage', loadAppointments);
+    const handleStorageChange = (event: StorageEvent) => {
+      if (event.key === APPOINTMENTS_STORAGE_KEY) {
+        loadAppointments();
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
     return () => {
-      window.removeEventListener('storage', loadAppointments);
+      window.removeEventListener('storage', handleStorageChange);
     };
   }, [loadAppointments]);
 
 
   const handleInfoSubmit: SubmitHandler<PatientInfoFormData> = async (data) => {
     setIsSubmittingInfo(true);
-    await new Promise(resolve => setTimeout(resolve, 300));
+    await new Promise(resolve => setTimeout(resolve, 300)); // Simulate API call
     setSubmittedData(data);
     setAiSuggestions(null); 
     toast({
       title: "Information Saved",
-      description: "Your details have been recorded for confirmation.",
+      description: "Your details have been recorded.",
     });
     setIsSubmittingInfo(false);
   };
@@ -123,13 +131,39 @@ export default function DashboardPage() {
   const getStatusIcon = (status: Appointment['status']) => {
     switch (status) {
       case 'Pending Confirmation':
-        return <ClockIcon className="h-4 w-4 text-yellow-500 mr-2" />;
+        return <ClockIcon className="h-4 w-4 text-yellow-500 mr-2 shrink-0" />;
       case 'Confirmed':
-        return <CheckCircle2 className="h-4 w-4 text-green-500 mr-2" />;
+        return <CheckCircle2 className="h-4 w-4 text-green-500 mr-2 shrink-0" />;
       case 'Cancelled':
-        return <CalendarX2 className="h-4 w-4 text-red-500 mr-2" />;
+        return <CalendarX2 className="h-4 w-4 text-red-500 mr-2 shrink-0" />;
       default:
         return null;
+    }
+  };
+
+  const handleUpdateAppointmentStatus = (appointmentId: string, newStatus: Appointment['status']) => {
+    try {
+      const storedAppointments = localStorage.getItem(APPOINTMENTS_STORAGE_KEY);
+      let appointments: Appointment[] = storedAppointments ? JSON.parse(storedAppointments) : [];
+      
+      appointments = appointments.map(app => 
+        app.id === appointmentId ? { ...app, status: newStatus } : app
+      );
+      
+      localStorage.setItem(APPOINTMENTS_STORAGE_KEY, JSON.stringify(appointments));
+      loadAppointments(); // Reload to update UI and state
+
+      toast({
+        title: `Appointment ${newStatus}`,
+        description: `The appointment has been successfully ${newStatus.toLowerCase()}.`,
+      });
+    } catch (error) {
+      console.error("Failed to update appointment status", error);
+      toast({
+        title: "Update Error",
+        description: "Could not update appointment status. Please try again.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -293,7 +327,7 @@ export default function DashboardPage() {
               <CardTitle className="flex items-center gap-2 text-xl md:text-2xl text-primary">
                 <ListChecks className="h-6 w-6" /> My Appointments
               </CardTitle>
-              <CardDescription>View status of your requested appointments.</CardDescription>
+              <CardDescription>View and manage the status of your requested appointments.</CardDescription>
             </CardHeader>
             <CardContent>
               {myAppointments.length > 0 ? (
@@ -314,6 +348,41 @@ export default function DashboardPage() {
                         }`}>
                           {appointment.status}
                         </span>
+                      </div>
+                      <div className="mt-3 pt-3 border-t border-border flex flex-col sm:flex-row gap-2">
+                        {appointment.status === 'Pending Confirmation' && (
+                          <>
+                            <Button 
+                              size="sm" 
+                              variant="outline" 
+                              className="w-full sm:w-auto border-green-500 text-green-600 hover:bg-green-50 hover:text-green-700"
+                              onClick={() => handleUpdateAppointmentStatus(appointment.id, 'Confirmed')}
+                            >
+                              <ThumbsUp className="mr-2 h-4 w-4" /> Confirm
+                            </Button>
+                            <Button 
+                              size="sm" 
+                              variant="outline" 
+                              className="w-full sm:w-auto border-red-500 text-red-600 hover:bg-red-50 hover:text-red-700"
+                              onClick={() => handleUpdateAppointmentStatus(appointment.id, 'Cancelled')}
+                            >
+                              <XCircle className="mr-2 h-4 w-4" /> Cancel
+                            </Button>
+                          </>
+                        )}
+                        {appointment.status === 'Confirmed' && (
+                           <Button 
+                            size="sm" 
+                            variant="outline" 
+                            className="w-full sm:w-auto border-red-500 text-red-600 hover:bg-red-50 hover:text-red-700"
+                            onClick={() => handleUpdateAppointmentStatus(appointment.id, 'Cancelled')}
+                          >
+                            <XCircle className="mr-2 h-4 w-4" /> Cancel Appointment
+                          </Button>
+                        )}
+                        {appointment.status === 'Cancelled' && (
+                          <p className="text-xs text-muted-foreground italic">This appointment has been cancelled.</p>
+                        )}
                       </div>
                     </li>
                   ))}
@@ -337,3 +406,4 @@ export default function DashboardPage() {
     </div>
   );
 }
+
