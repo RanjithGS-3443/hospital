@@ -17,10 +17,12 @@ import { useAuth } from '@/hooks/use-auth';
 import { Logo } from '@/components/logo';
 import { useToast } from '@/hooks/use-toast';
 import { patientInfoSchema, type PatientInfoFormData } from '@/lib/schemas';
-import { getAISuggestions } from './actions';
+import { getAISuggestions, handleVoiceAppointmentBooking } from './actions';
 import type { SuggestServicesInput, SuggestServicesOutput } from '@/ai/flows/suggest-services';
+import type { BookAppointmentOutput } from '@/ai/flows/book-appointment-flow';
 import type { Appointment } from '@/lib/types';
-import { Loader2, LogOut, UserCircle, Phone, ClipboardEdit, Sparkles, CheckCircle2, AlertTriangle, Users, ListChecks, ClockIcon, CalendarX2, ThumbsUp, XCircle, Mic, MicOff, Volume2, MessagesSquare, Languages } from 'lucide-react';
+import { doctorsData } from '@/lib/data';
+import { Loader2, LogOut, UserCircle, Phone, ClipboardEdit, Sparkles, CheckCircle2, AlertTriangle, Users, ListChecks, ClockIcon, CalendarX2, ThumbsUp, XCircle, Mic, MicOff, Volume2, MessagesSquare, Languages, MessageCircleQuestion } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 
@@ -38,9 +40,9 @@ interface VoiceButtonLabels {
 }
 
 const voiceButtonLabelsMap: Record<string, VoiceButtonLabels> = {
-  'en-US': { default: 'Voice Input (Reason for Visit)', listening: 'Listening...' },
-  'kn-IN': { default: 'ಧ್ವನಿ ಇನ್‌ಪುಟ್ (ಭೇಟಿ ಕಾರಣ)', listening: 'ಕೇಳಲಾಗುತ್ತಿದೆ...' },
-  'hi-IN': { default: 'वॉइस इनपुट (विजिट का कारण)', listening: 'सुन रहा है...' },
+  'en-US': { default: 'Book by Voice', listening: 'Listening...' },
+  'kn-IN': { default: 'ಧ್ವನಿ ಮೂಲಕ ಬುಕ್ ಮಾಡಿ', listening: 'ಕೇಳಲಾಗುತ್ತಿದೆ...' },
+  'hi-IN': { default: 'आवाज से बुक करें', listening: 'सुन रहा है...' },
 };
 
 
@@ -51,17 +53,18 @@ export default function DashboardPage() {
 
   const [submittedData, setSubmittedData] = useState<PatientInfoFormData | null>(null);
   const [aiSuggestions, setAiSuggestions] = useState<SuggestServicesOutput | null>(null);
+  const [voiceBookingResponse, setVoiceBookingResponse] = useState<BookAppointmentOutput | null>(null);
   const [isSubmittingInfo, setIsSubmittingInfo] = useState(false);
   const [isFetchingSuggestions, setIsFetchingSuggestions] = useState(false);
+  const [isProcessingVoiceBooking, setIsProcessingVoiceBooking] = useState(false);
   const [myAppointments, setMyAppointments] = useState<Appointment[]>([]);
 
-  // Voice Assistant State
   const [selectedVoiceLanguage, setSelectedVoiceLanguage] = useState<string>(voiceLanguages[0].value);
   const [voiceButtonLabel, setVoiceButtonLabel] = useState<string>(voiceButtonLabelsMap[voiceLanguages[0].value].default);
   const [listeningStateLabel, setListeningStateLabel] = useState<string>(voiceButtonLabelsMap[voiceLanguages[0].value].listening);
   const [isListening, setIsListening] = useState(false);
   const [isSpeaking, setIsSpeaking] = useState(false);
-  const [voiceTranscript, setVoiceTranscript] = useState<string | null>(null);
+  const [lastVoiceTranscript, setLastVoiceTranscript] = useState<string | null>(null);
   const [voiceError, setVoiceError] = useState<string | null>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
   const speechSynthesisRef = useRef<SpeechSynthesis | null>(null);
@@ -74,7 +77,7 @@ export default function DashboardPage() {
     defaultValues: {
       name: "",
       contactDetails: "",
-      appointmentDetails: "",
+      appointmentDetails: "", // This will be for general AI suggestions, not voice booking
     },
   });
 
@@ -92,7 +95,6 @@ export default function DashboardPage() {
         const instance = new SpeechRecognitionAPI();
         instance.continuous = false;
         instance.interimResults = false;
-        // instance.lang will be set dynamically
         recognitionRef.current = instance;
       } else {
         setSpeechRecognitionSupported(false);
@@ -102,7 +104,7 @@ export default function DashboardPage() {
       if ('speechSynthesis' in window) {
         setSpeechSynthesisSupported(true);
         speechSynthesisRef.current = window.speechSynthesis;
-        speechSynthesisRef.current.cancel(); 
+        if (speechSynthesisRef.current) speechSynthesisRef.current.cancel(); 
       } else {
         setSpeechSynthesisSupported(false);
         console.warn("Speech Synthesis API not supported in this browser.");
@@ -162,20 +164,22 @@ export default function DashboardPage() {
 
   const handleInfoSubmit: SubmitHandler<PatientInfoFormData> = async (data) => {
     setIsSubmittingInfo(true);
-    setSubmittedData(data);
+    setSubmittedData(data); // Save form data for potential AI suggestions
+    setAiSuggestions(null); // Clear previous suggestions
+    setVoiceBookingResponse(null); // Clear previous voice booking responses
     toast({
       title: "Information Updated",
-      description: "Your details have been updated. You can now get AI assistance.",
+      description: "Your details have been updated. You can now get AI assistance for suggestions.",
     });
     setIsSubmittingInfo(false);
   };
   
-  const speakText = useCallback((text: string) => {
+  const speakText = useCallback((text: string, lang: string) => {
     if (!speechSynthesisRef.current || !speechSynthesisSupported || !text) return;
     speechSynthesisRef.current.cancel(); 
     const utterance = new SpeechSynthesisUtterance(text);
-    utterance.lang = selectedVoiceLanguage; 
-    const selectedLangLabel = voiceLanguages.find(l => l.value === selectedVoiceLanguage)?.label || selectedVoiceLanguage;
+    utterance.lang = lang; 
+    const selectedLangLabel = voiceLanguages.find(l => l.value === lang)?.label || lang;
 
     utterance.onstart = () => setIsSpeaking(true);
     utterance.onend = () => setIsSpeaking(false);
@@ -191,32 +195,33 @@ export default function DashboardPage() {
       toast({ title: "Speech Error", description: errorDescription, variant: "destructive" });
     };
     speechSynthesisRef.current.speak(utterance);
-  }, [speechSynthesisSupported, toast, selectedVoiceLanguage]);
+  }, [speechSynthesisSupported, toast]);
 
 
-  const handleGetAssistance = async (dataToProcess?: PatientInfoFormData) => {
-    const currentData = dataToProcess || submittedData || form.getValues();
+  const handleGetGeneralAssistance = async () => {
+    const currentData = submittedData || form.getValues();
 
     if (!currentData.name || !currentData.contactDetails || !currentData.appointmentDetails) {
-      toast({ title: "Missing Information", description: "Please ensure name, contact, and appointment details are provided.", variant: "destructive" });
-      if (!submittedData && !dataToProcess) { 
+      toast({ title: "Missing Information for Suggestions", description: "Please ensure name, contact, and appointment details are provided in the form for general suggestions.", variant: "destructive" });
+      if (!submittedData) { 
         if (!currentData.name) form.setError("name", { type: "manual", message: "Name is required." });
         if (!currentData.contactDetails) form.setError("contactDetails", { type: "manual", message: "Contact details are required." });
-        if (!currentData.appointmentDetails) form.setError("appointmentDetails", { type: "manual", message: "Appointment details are required." });
+        if (!currentData.appointmentDetails) form.setError("appointmentDetails", { type: "manual", message: "Appointment details are required for suggestions." });
       }
       return;
     }
-
-    if (!dataToProcess && form.formState.isValid) {
+    
+    if (form.formState.isValid) {
         setSubmittedData(form.getValues());
     }
 
     setIsFetchingSuggestions(true);
     setAiSuggestions(null);
+    setVoiceBookingResponse(null); // Clear voice booking response
     try {
       const aiInput: SuggestServicesInput = {
         ...currentData,
-        language: selectedVoiceLanguage,
+        language: selectedVoiceLanguage, // Use selected language for suggestions too
       };
       const suggestions = await getAISuggestions(aiInput);
       setAiSuggestions(suggestions);
@@ -224,6 +229,11 @@ export default function DashboardPage() {
         title: "Suggestions Ready",
         description: "AI has provided some recommendations.",
       });
+       if (suggestions.suggestedServices && speechSynthesisSupported && !isFetchingSuggestions) {
+         if (speechSynthesisRef.current && !speechSynthesisRef.current.speaking) {
+            speakText(suggestions.suggestedServices, selectedVoiceLanguage);
+         }
+       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Could not fetch AI suggestions.";
       setAiSuggestions({ suggestedServices: `Error: ${errorMessage}` });
@@ -236,16 +246,45 @@ export default function DashboardPage() {
     setIsFetchingSuggestions(false);
   };
   
-  useEffect(() => {
-    if (aiSuggestions?.suggestedServices && speechSynthesisSupported && !isFetchingSuggestions) {
-      if (speechSynthesisRef.current && !speechSynthesisRef.current.speaking) {
-         speakText(aiSuggestions.suggestedServices);
-      }
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [aiSuggestions, speechSynthesisSupported, isFetchingSuggestions]); // speakText is memoized
+  const saveAppointmentToLocalStorage = (doctorId: string) => {
+    const doctor = doctorsData.find(d => d.id === doctorId);
+    if (!doctor) return;
 
-  const startListening = () => {
+    const newAppointment: Appointment = {
+      id: Date.now().toString(),
+      doctorId: doctor.id,
+      doctorName: doctor.name,
+      doctorSpecialty: doctor.specialty,
+      status: "Pending Confirmation",
+      requestedAt: new Date().toISOString(),
+    };
+
+    try {
+      const existingAppointmentsRaw = localStorage.getItem(APPOINTMENTS_STORAGE_KEY);
+      const existingAppointments: Appointment[] = existingAppointmentsRaw ? JSON.parse(existingAppointmentsRaw) : [];
+      existingAppointments.push(newAppointment);
+      localStorage.setItem(APPOINTMENTS_STORAGE_KEY, JSON.stringify(existingAppointments));
+      
+      window.dispatchEvent(new Event('storage')); // To update appointment list
+      loadAppointments(); // Reload appointments immediately
+
+      toast({
+        title: "Appointment Request Sent!",
+        description: `Your request to book an appointment with ${doctor.name} has been sent and is pending confirmation.`,
+        duration: 7000,
+      });
+    } catch (error) {
+      console.error("Failed to save appointment to localStorage", error);
+      toast({
+        title: "Booking Error",
+        description: "Could not save your appointment request locally. Please try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+
+  const startListeningForBooking = () => {
     if (!recognitionRef.current || !speechRecognitionSupported) {
       toast({ title: "Voice Input Not Supported", description: "Your browser does not support speech recognition.", variant: "destructive" });
       return;
@@ -256,32 +295,44 @@ export default function DashboardPage() {
     }
 
     setIsListening(true);
-    setVoiceTranscript(null);
+    setLastVoiceTranscript(null);
     setVoiceError(null);
     setAiSuggestions(null); 
+    setVoiceBookingResponse(null);
 
     recognitionRef.current.lang = selectedVoiceLanguage;
     const selectedLangLabel = voiceLanguages.find(l => l.value === selectedVoiceLanguage)?.label || selectedVoiceLanguage;
 
-
-    recognitionRef.current.onresult = (event) => {
+    recognitionRef.current.onresult = async (event) => {
       const transcript = event.results[0][0].transcript;
-      setVoiceTranscript(transcript);
-      form.setValue('appointmentDetails', transcript, { shouldValidate: true }); 
+      setLastVoiceTranscript(transcript);
+      form.setValue('appointmentDetails', ""); // Clear general details field as voice is for booking now
       
-      const name = form.getValues('name');
-      const contactDetails = form.getValues('contactDetails');
+      setIsProcessingVoiceBooking(true);
+      try {
+        const bookingResult = await handleVoiceAppointmentBooking(transcript, selectedVoiceLanguage);
+        setVoiceBookingResponse(bookingResult);
+        
+        if (bookingResult.bookedDoctorId && !bookingResult.isError) {
+          saveAppointmentToLocalStorage(bookingResult.bookedDoctorId);
+          // The toast from saveAppointmentToLocalStorage will cover this
+        } else {
+           toast({
+            title: bookingResult.isError ? "Booking Issue" : "Voice Booking",
+            description: bookingResult.bookingConfirmationMessage,
+            variant: bookingResult.isError ? "destructive" : "default",
+          });
+        }
+        if (bookingResult.bookingConfirmationMessage && speechSynthesisSupported) {
+          speakText(bookingResult.bookingConfirmationMessage, selectedVoiceLanguage);
+        }
 
-      if (!name || !contactDetails) {
-        toast({title: "Information Missing", description: "Please enter your name and contact details before using voice input.", variant: "destructive"});
-        if (!name) form.setError("name", { type: "manual", message: "Name is required for voice assistance." });
-        if (!contactDetails) form.setError("contactDetails", { type: "manual", message: "Contact details are required for voice assistance." });
-        setIsListening(false);
-        return;
+      } catch (error) {
+         const errorMsg = error instanceof Error ? error.message : "Could not process voice booking.";
+         setVoiceBookingResponse({ bookingConfirmationMessage: errorMsg, isError: true });
+         toast({ title: "Voice Booking Error", description: errorMsg, variant: "destructive" });
       }
-      const voiceInputData: PatientInfoFormData = { name, contactDetails, appointmentDetails: transcript };
-      setSubmittedData(voiceInputData); 
-      handleGetAssistance(voiceInputData);
+      setIsProcessingVoiceBooking(false);
     };
 
     recognitionRef.current.onerror = (event) => {
@@ -294,10 +345,12 @@ export default function DashboardPage() {
       setVoiceError(errorMsg);
       toast({ title: "Voice Input Error", description: errorMsg, variant: "destructive" });
       setIsListening(false);
+      setIsProcessingVoiceBooking(false);
     };
 
     recognitionRef.current.onend = () => {
       setIsListening(false);
+      //setIsProcessingVoiceBooking(false); // Handled in onresult/onerror
     };
 
     recognitionRef.current.start();
@@ -314,7 +367,7 @@ export default function DashboardPage() {
     if (isListening) {
       stopListening();
     } else {
-      startListening();
+      startListeningForBooking();
     }
   };
 
@@ -394,9 +447,9 @@ export default function DashboardPage() {
           <Card className="shadow-lg">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-xl md:text-2xl text-primary">
-                <ClipboardEdit className="h-6 w-6" /> Patient Information
+                <ClipboardEdit className="h-6 w-6" /> Patient Information & General Assistance
               </CardTitle>
-              <CardDescription>Enter patient details. You can use voice input for 'Reason for Visit' after filling name/contact and selecting a language below.</CardDescription>
+              <CardDescription>Enter patient details and reason for visit to get general AI suggestions. For voice appointment booking, use the "Book by Voice" button below.</CardDescription>
             </CardHeader>
             <CardContent>
               <Form {...form}>
@@ -432,99 +485,98 @@ export default function DashboardPage() {
                     name="appointmentDetails"
                     render={({ field }) => (
                       <FormItem>
-                        <FormLabel className="flex items-center gap-1"><ClipboardEdit className="h-4 w-4 text-muted-foreground" />Reason for Visit / Appointment Details</FormLabel>
+                        <FormLabel className="flex items-center gap-1"><MessageCircleQuestion className="h-4 w-4 text-muted-foreground" />Reason for Visit / Symptoms (for AI Suggestions)</FormLabel>
                         <FormControl>
-                          <Textarea placeholder="Describe the reason for the visit or desired appointment details..." {...field} rows={4} />
+                          <Textarea placeholder="Describe symptoms or reason for visit for general AI suggestions..." {...field} rows={3} />
                         </FormControl>
                         <FormMessage />
                       </FormItem>
                     )}
                   />
-                  <div className="flex flex-col sm:flex-row gap-4 items-start">
-                     <Button type="submit" className="w-full sm:w-auto" disabled={isSubmittingInfo}>
-                        {isSubmittingInfo ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                        Save/Update Information
-                     </Button>
-                    <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
-                        <Select value={selectedVoiceLanguage} onValueChange={setSelectedVoiceLanguage}>
-                            <SelectTrigger className="w-full sm:w-[180px]" aria-label="Select voice language">
-                                <Languages className="mr-2 h-4 w-4"/>
-                                <SelectValue placeholder="Select language" />
-                            </SelectTrigger>
-                            <SelectContent>
-                                {voiceLanguages.map(lang => (
-                                    <SelectItem key={lang.value} value={lang.value}>{lang.label}</SelectItem>
-                                ))}
-                            </SelectContent>
-                        </Select>
-                        <Button 
-                            type="button" 
-                            variant="outline" 
-                            onClick={toggleListening} 
-                            className="w-full sm:w-auto" 
-                            disabled={!speechRecognitionSupported || isSubmittingInfo || isFetchingSuggestions}
-                            title={!speechRecognitionSupported ? "Speech recognition not supported" : (isListening ? `Stop listening (${currentSelectedLanguageLabel})` : `Start voice input for 'Reason for Visit' (${currentSelectedLanguageLabel})`)}
-                        >
-                            {isListening ? <MicOff className="mr-2 h-4 w-4 text-red-500" /> : <Mic className="mr-2 h-4 w-4" />}
-                            {isListening ? listeningStateLabel : voiceButtonLabel}
-                        </Button>
-                    </div>
-                  </div>
-                  <p className="text-xs text-muted-foreground mt-1">
-                      Using {currentSelectedLanguageLabel} for voice input. AI will respond in {currentSelectedLanguageLabel} if possible. Spoken output uses {currentSelectedLanguageLabel} voice if available.
-                  </p>
-                  {!speechRecognitionSupported && <p className="text-xs text-destructive mt-2">Voice input is not supported by your browser.</p>}
+                   <Button type="submit" className="w-full sm:w-auto" disabled={isSubmittingInfo}>
+                      {isSubmittingInfo ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      Save/Update Info
+                   </Button>
                 </form>
               </Form>
             </CardContent>
+             <CardFooter className="flex flex-col sm:flex-row gap-4 items-start pt-4 border-t">
+                <div className="flex flex-col sm:flex-row gap-2 w-full sm:w-auto">
+                    <Select value={selectedVoiceLanguage} onValueChange={setSelectedVoiceLanguage}>
+                        <SelectTrigger className="w-full sm:w-[180px]" aria-label="Select voice language">
+                            <Languages className="mr-2 h-4 w-4"/>
+                            <SelectValue placeholder="Select language" />
+                        </SelectTrigger>
+                        <SelectContent>
+                            {voiceLanguages.map(lang => (
+                                <SelectItem key={lang.value} value={lang.value}>{lang.label}</SelectItem>
+                            ))}
+                        </SelectContent>
+                    </Select>
+                    <Button 
+                        type="button" 
+                        variant="outline" 
+                        onClick={toggleListening} 
+                        className="w-full sm:w-auto" 
+                        disabled={!speechRecognitionSupported || isSubmittingInfo || isFetchingSuggestions || isProcessingVoiceBooking || isListening}
+                        title={!speechRecognitionSupported ? "Speech recognition not supported" : (isListening ? `Stop listening (${currentSelectedLanguageLabel})` : `Start voice input for booking (${currentSelectedLanguageLabel})`)}
+                    >
+                        {isListening ? <MicOff className="mr-2 h-4 w-4 text-red-500" /> : <Mic className="mr-2 h-4 w-4" />}
+                        {isListening ? listeningStateLabel : voiceButtonLabel}
+                        {(isProcessingVoiceBooking && !isListening) && <Loader2 className="ml-2 h-4 w-4 animate-spin" />}
+                    </Button>
+                </div>
+             </CardFooter>
+             <CardContent className="pt-2">
+                <p className="text-xs text-muted-foreground mt-1">
+                    Use "{voiceButtonLabel}" in {currentSelectedLanguageLabel} to request an appointment (e.g., "Book appointment with Dr. Reed"). AI will respond in {currentSelectedLanguageLabel}.
+                </p>
+                {!speechRecognitionSupported && <p className="text-xs text-destructive mt-2">Voice input is not supported by your browser.</p>}
+             </CardContent>
           </Card>
 
-          {voiceTranscript && (
+          {lastVoiceTranscript && (
             <Card className="shadow-sm border-blue-500">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-lg text-blue-600">
-                  <MessagesSquare className="h-5 w-5" /> Last Voice Input ({currentSelectedLanguageLabel})
+                  <MessagesSquare className="h-5 w-5" /> Last Voice Input ({currentSelectedLanguageLabel}) for Booking
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-sm text-muted-foreground italic">"{voiceTranscript}"</p>
+                <p className="text-sm text-muted-foreground italic">"{lastVoiceTranscript}"</p>
                  {voiceError && <p className="text-sm text-destructive mt-2">{voiceError}</p>}
               </CardContent>
             </Card>
           )}
           
-          {(submittedData || form.getValues('appointmentDetails')) && !aiSuggestions && !isFetchingSuggestions && (
+          {/* Section for general AI suggestions based on form input */}
+          {(submittedData && submittedData.appointmentDetails) && !aiSuggestions && !isFetchingSuggestions && !voiceBookingResponse && (
             <Card className="shadow-lg">
                 <CardHeader>
                     <CardTitle className="flex items-center gap-2 text-xl md:text-2xl text-primary">
-                        <CheckCircle2 className="h-6 w-6 text-green-500" /> Ready for Assistance
+                        <CheckCircle2 className="h-6 w-6 text-green-500" /> Ready for General Assistance
                     </CardTitle>
                     <CardDescription>
-                        {submittedData?.appointmentDetails ? 
-                        `Review the information. If correct, click below to get AI-powered assistance for "${submittedData.appointmentDetails.substring(0,50)}${submittedData.appointmentDetails.length > 50 ? '...' : ''}".`
-                        : "Information is ready. Click below to get AI-powered assistance."}
+                        Patient information and reason for visit are saved. Click below to get AI-powered suggestions based on the typed details.
                     </CardDescription>
                 </CardHeader>
-                {submittedData && (
-                    <CardContent className="space-y-1 text-sm border-b pb-4 mb-4">
-                        <p><strong>Name:</strong> {submittedData.name}</p>
-                        <p><strong>Contact:</strong> {submittedData.contactDetails}</p>
-                        <p><strong>Details:</strong> {submittedData.appointmentDetails}</p>
-                    </CardContent>
-                )}
+                 <CardContent className="space-y-1 text-sm border-b pb-4 mb-4">
+                    <p><strong>Name:</strong> {submittedData.name}</p>
+                    <p><strong>Contact:</strong> {submittedData.contactDetails}</p>
+                    <p><strong>Details for Suggestions:</strong> {submittedData.appointmentDetails}</p>
+                </CardContent>
                 <CardFooter>
-                    <Button onClick={() => handleGetAssistance()} className="w-full sm:w-auto" disabled={isFetchingSuggestions || !((submittedData?.name && submittedData?.contactDetails && submittedData?.appointmentDetails) || (form.getValues("name") && form.getValues("contactDetails") && form.getValues("appointmentDetails")))}>
+                    <Button onClick={handleGetGeneralAssistance} className="w-full sm:w-auto" disabled={isFetchingSuggestions || !submittedData.appointmentDetails}>
                     {isFetchingSuggestions ? (
                         <Loader2 className="mr-2 h-4 w-4 animate-spin" />
                     ) : (
                         <Sparkles className="mr-2 h-4 w-4" />
                     )}
-                    Get Intelligent Assistance
+                    Get Suggestions for Symptoms
                     </Button>
                 </CardFooter>
             </Card>
           )}
-
 
           {isFetchingSuggestions && !aiSuggestions && (
              <Card className="shadow-lg">
@@ -535,7 +587,7 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent className="flex items-center justify-center p-8">
                   <Loader2 className="h-8 w-8 animate-spin text-primary mr-3" />
-                  <p className="text-muted-foreground">Fetching suggestions from our AI assistant...</p>
+                  <p className="text-muted-foreground">Fetching suggestions based on your input...</p>
               </CardContent>
              </Card>
           )}
@@ -544,13 +596,13 @@ export default function DashboardPage() {
             <Card className="shadow-lg">
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-xl md:text-2xl text-primary">
-                  <Sparkles className="h-6 w-6" /> AI Suggested Services
+                  <Sparkles className="h-6 w-6" /> AI Suggested Services (from form)
                    {isSpeaking && <Volume2 className="h-5 w-5 ml-2 text-blue-500 animate-pulse" />}
                 </CardTitle>
                 <CardDescription>
-                    Based on the provided information, here are some relevant services (in {currentSelectedLanguageLabel} if available).
+                    Based on the information you typed, here are some relevant services (in {currentSelectedLanguageLabel}).
                     {speechSynthesisSupported && !isSpeaking && aiSuggestions.suggestedServices && 
-                    <Button variant="link" size="sm" className="p-0 h-auto ml-1" onClick={() => speakText(aiSuggestions.suggestedServices!)}>
+                    <Button variant="link" size="sm" className="p-0 h-auto ml-1" onClick={() => speakText(aiSuggestions.suggestedServices!, selectedVoiceLanguage)}>
                         Speak again ({currentSelectedLanguageLabel})
                     </Button>}
                 </CardDescription>
@@ -571,6 +623,46 @@ export default function DashboardPage() {
               </CardContent>
             </Card>
           )}
+
+          {/* Section for Voice Booking Response */}
+           {isProcessingVoiceBooking && !voiceBookingResponse && (
+             <Card className="shadow-lg">
+              <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-xl md:text-2xl text-primary">
+                      <Mic className="h-6 w-6 animate-pulse" /> Voice Appointment Booking
+                  </CardTitle>
+              </CardHeader>
+              <CardContent className="flex items-center justify-center p-8">
+                  <Loader2 className="h-8 w-8 animate-spin text-primary mr-3" />
+                  <p className="text-muted-foreground">Processing your voice request for booking...</p>
+              </CardContent>
+             </Card>
+          )}
+
+          {voiceBookingResponse && (
+            <Card className={`shadow-lg ${voiceBookingResponse.isError ? 'border-destructive' : 'border-green-500'}`}>
+              <CardHeader>
+                <CardTitle className={`flex items-center gap-2 text-xl md:text-2xl ${voiceBookingResponse.isError ? 'text-destructive' : 'text-green-600'}`}>
+                  {voiceBookingResponse.isError ? <AlertTriangle className="h-6 w-6" /> : <CheckCircle2 className="h-6 w-6" />}
+                   Voice Booking Attempt
+                   {isSpeaking && <Volume2 className="h-5 w-5 ml-2 text-blue-500 animate-pulse" />}
+                </CardTitle>
+                 <CardDescription>
+                    AI response to your voice booking request (in {currentSelectedLanguageLabel}).
+                    {speechSynthesisSupported && !isSpeaking && voiceBookingResponse.bookingConfirmationMessage && 
+                    <Button variant="link" size="sm" className="p-0 h-auto ml-1" onClick={() => speakText(voiceBookingResponse.bookingConfirmationMessage!, selectedVoiceLanguage)}>
+                        Speak again ({currentSelectedLanguageLabel})
+                    </Button>}
+                </CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="prose prose-sm max-w-none text-foreground dark:prose-invert">
+                   <p>{voiceBookingResponse.bookingConfirmationMessage}</p>
+                </div>
+              </CardContent>
+            </Card>
+          )}
+
         </div>
 
         <div className="lg:col-span-1 space-y-8">
@@ -644,7 +736,7 @@ export default function DashboardPage() {
                   <Users className="h-12 w-12 mx-auto mb-2 opacity-50" />
                   <p>No appointments requested yet.</p>
                   <Link href="/doctors" className={buttonVariants({ variant: "link", className: "mt-2" })}>
-                    Find a Doctor
+                    Find a Doctor or Book by Voice
                   </Link>
                 </div>
               )}
@@ -658,3 +750,4 @@ export default function DashboardPage() {
     </div>
   );
 }
+
