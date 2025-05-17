@@ -2,7 +2,7 @@
 "use client";
 
 import type React from 'react';
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { useForm, type SubmitHandler } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import Link from 'next/link';
@@ -19,7 +19,7 @@ import { patientInfoSchema, type PatientInfoFormData } from '@/lib/schemas';
 import { getAISuggestions } from './actions';
 import type { SuggestServicesOutput } from '@/ai/flows/suggest-services';
 import type { Appointment } from '@/lib/types';
-import { Loader2, LogOut, UserCircle, Phone, ClipboardEdit, Sparkles, CheckCircle2, AlertTriangle, Users, ListChecks, ClockIcon, CalendarX2, ThumbsUp, XCircle } from 'lucide-react';
+import { Loader2, LogOut, UserCircle, Phone, ClipboardEdit, Sparkles, CheckCircle2, AlertTriangle, Users, ListChecks, ClockIcon, CalendarX2, ThumbsUp, XCircle, Mic, MicOff, Volume2, MessagesSquare } from 'lucide-react';
 import { useRouter } from 'next/navigation';
 import { format } from 'date-fns';
 
@@ -36,6 +36,17 @@ export default function DashboardPage() {
   const [isFetchingSuggestions, setIsFetchingSuggestions] = useState(false);
   const [myAppointments, setMyAppointments] = useState<Appointment[]>([]);
 
+  // Voice Assistant State
+  const [isListening, setIsListening] = useState(false);
+  const [isSpeaking, setIsSpeaking] = useState(false);
+  const [voiceTranscript, setVoiceTranscript] = useState<string | null>(null);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const speechSynthesisRef = useRef<SpeechSynthesis | null>(null);
+  const [speechRecognitionSupported, setSpeechRecognitionSupported] = useState(false);
+  const [speechSynthesisSupported, setSpeechSynthesisSupported] = useState(false);
+
+
   const form = useForm<PatientInfoFormData>({
     resolver: zodResolver(patientInfoSchema),
     defaultValues: {
@@ -44,6 +55,33 @@ export default function DashboardPage() {
       appointmentDetails: "",
     },
   });
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const SpeechRecognitionAPI = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (SpeechRecognitionAPI) {
+        setSpeechRecognitionSupported(true);
+        const instance = new SpeechRecognitionAPI();
+        instance.continuous = false;
+        instance.interimResults = false;
+        instance.lang = 'en-US';
+        recognitionRef.current = instance;
+      } else {
+        setSpeechRecognitionSupported(false);
+        console.warn("Speech Recognition API not supported in this browser.");
+      }
+
+      if ('speechSynthesis' in window) {
+        setSpeechSynthesisSupported(true);
+        speechSynthesisRef.current = window.speechSynthesis;
+        // Clear any pending utterances on page load/refresh
+        speechSynthesisRef.current.cancel(); 
+      } else {
+        setSpeechSynthesisSupported(false);
+        console.warn("Speech Synthesis API not supported in this browser.");
+      }
+    }
+  }, []);
 
   const loadAppointments = useCallback(() => {
     try {
@@ -76,6 +114,9 @@ export default function DashboardPage() {
     if (user?.name) {
       form.setValue('name', user.name);
     }
+     if (user?.email && !form.getValues('contactDetails')) { // Only if contact details are empty
+      form.setValue('contactDetails', user.email);
+    }
   }, [user, form]);
 
   useEffect(() => {
@@ -94,40 +135,158 @@ export default function DashboardPage() {
 
   const handleInfoSubmit: SubmitHandler<PatientInfoFormData> = async (data) => {
     setIsSubmittingInfo(true);
-    await new Promise(resolve => setTimeout(resolve, 300)); // Simulate API call
     setSubmittedData(data);
-    setAiSuggestions(null); 
+    // Do not clear AI suggestions if they were from voice input just prior
+    // setAiSuggestions(null); 
     toast({
-      title: "Information Saved",
-      description: "Your details have been recorded.",
+      title: "Information Updated",
+      description: "Your details have been updated. You can now get AI assistance.",
     });
     setIsSubmittingInfo(false);
   };
+  
+  const speakText = useCallback((text: string) => {
+    if (!speechSynthesisRef.current || !speechSynthesisSupported || !text) return;
+    speechSynthesisRef.current.cancel(); // Cancel any previous speech
+    const utterance = new SpeechSynthesisUtterance(text);
+    utterance.lang = 'en-US';
+    utterance.onstart = () => setIsSpeaking(true);
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = (event) => {
+      console.error("Speech synthesis error", event);
+      setIsSpeaking(false);
+      toast({ title: "Speech Error", description: "Could not speak the response.", variant: "destructive" });
+    };
+    speechSynthesisRef.current.speak(utterance);
+  }, [speechSynthesisSupported, toast]);
 
-  const handleGetAssistance = async () => {
-    if (!submittedData) {
-      toast({ title: "No Data", description: "Please submit patient information first.", variant: "destructive" });
+
+  const handleGetAssistance = async (dataToProcess?: PatientInfoFormData) => {
+    const currentData = dataToProcess || submittedData || form.getValues();
+
+    if (!currentData.name || !currentData.contactDetails || !currentData.appointmentDetails) {
+      toast({ title: "Missing Information", description: "Please ensure name, contact, and appointment details are provided.", variant: "destructive" });
+      if (!submittedData && !dataToProcess) { // If form not submitted and not from voice
+         // Highlight missing fields
+        if (!currentData.name) form.setError("name", { type: "manual", message: "Name is required." });
+        if (!currentData.contactDetails) form.setError("contactDetails", { type: "manual", message: "Contact details are required." });
+        if (!currentData.appointmentDetails) form.setError("appointmentDetails", { type: "manual", message: "Appointment details are required." });
+      }
       return;
     }
+
+    // If data is coming directly from form submission (not voice), ensure it's set to submittedData
+    if (!dataToProcess && form.formState.isValid) {
+        setSubmittedData(form.getValues());
+    }
+
+
     setIsFetchingSuggestions(true);
     setAiSuggestions(null);
     try {
-      const suggestions = await getAISuggestions(submittedData);
+      const suggestions = await getAISuggestions(currentData);
       setAiSuggestions(suggestions);
+      if (suggestions.suggestedServices) {
+        speakText(suggestions.suggestedServices);
+      }
       toast({
         title: "Suggestions Ready",
         description: "AI has provided some recommendations.",
       });
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Could not fetch AI suggestions.";
+      setAiSuggestions({ suggestedServices: `Error: ${errorMessage}` });
       toast({
         title: "Error Fetching Suggestions",
-        description: (error instanceof Error ? error.message : "Could not fetch AI suggestions."),
+        description: errorMessage,
         variant: "destructive",
       });
     }
     setIsFetchingSuggestions(false);
   };
   
+  // Effect to speak when AI suggestions are updated
+  useEffect(() => {
+    if (aiSuggestions?.suggestedServices && speechSynthesisSupported && !isFetchingSuggestions) {
+      // Only speak if not already speaking from a previous request
+      if (speechSynthesisRef.current && !speechSynthesisRef.current.speaking) {
+         speakText(aiSuggestions.suggestedServices);
+      }
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiSuggestions, speechSynthesisSupported, isFetchingSuggestions]); // speakText is memoized
+
+  const startListening = () => {
+    if (!recognitionRef.current || !speechRecognitionSupported) {
+      toast({ title: "Voice Input Not Supported", description: "Your browser does not support speech recognition.", variant: "destructive" });
+      return;
+    }
+    if (isSpeaking && speechSynthesisRef.current) {
+      speechSynthesisRef.current.cancel(); // Stop speaking if user wants to talk
+      setIsSpeaking(false);
+    }
+
+    setIsListening(true);
+    setVoiceTranscript(null);
+    setVoiceError(null);
+    setAiSuggestions(null); // Clear previous AI suggestions
+
+    recognitionRef.current.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      setVoiceTranscript(transcript);
+      form.setValue('appointmentDetails', transcript, { shouldValidate: true }); // Update form field
+      
+      // Prepare data for AI suggestions using current form values for name/contact
+      const name = form.getValues('name');
+      const contactDetails = form.getValues('contactDetails');
+
+      if (!name || !contactDetails) {
+        toast({title: "Missing Details", description: "Please ensure your name and contact details are filled in the form before using voice input for appointment details.", variant: "destructive"});
+        if (!name) form.setError("name", { type: "manual", message: "Name is required for voice assistance." });
+        if (!contactDetails) form.setError("contactDetails", { type: "manual", message: "Contact details are required for voice assistance." });
+        setIsListening(false);
+        return;
+      }
+      // Update submittedData so the confirmation card shows the voice input
+      const voiceInputData = { name, contactDetails, appointmentDetails: transcript };
+      setSubmittedData(voiceInputData); 
+      handleGetAssistance(voiceInputData);
+    };
+
+    recognitionRef.current.onerror = (event) => {
+      console.error("Speech recognition error", event.error);
+      let errorMsg = "An error occurred during speech recognition.";
+      if (event.error === 'no-speech') errorMsg = "No speech was detected. Please try again.";
+      if (event.error === 'audio-capture') errorMsg = "Audio capture failed. Please check your microphone.";
+      if (event.error === 'not-allowed') errorMsg = "Microphone access denied. Please enable microphone permissions.";
+      setVoiceError(errorMsg);
+      toast({ title: "Voice Input Error", description: errorMsg, variant: "destructive" });
+      setIsListening(false);
+    };
+
+    recognitionRef.current.onend = () => {
+      setIsListening(false);
+    };
+
+    recognitionRef.current.start();
+  };
+
+  const stopListening = () => {
+    if (recognitionRef.current && isListening) {
+      recognitionRef.current.stop();
+    }
+    setIsListening(false);
+  };
+
+  const toggleListening = () => {
+    if (isListening) {
+      stopListening();
+    } else {
+      startListening();
+    }
+  };
+
+
   const getStatusIcon = (status: Appointment['status']) => {
     switch (status) {
       case 'Pending Confirmation':
@@ -151,7 +310,7 @@ export default function DashboardPage() {
       );
       
       localStorage.setItem(APPOINTMENTS_STORAGE_KEY, JSON.stringify(appointments));
-      loadAppointments(); // Reload to update UI and state
+      loadAppointments(); 
 
       toast({
         title: `Appointment ${newStatus}`,
@@ -202,7 +361,7 @@ export default function DashboardPage() {
               <CardTitle className="flex items-center gap-2 text-xl md:text-2xl text-primary">
                 <ClipboardEdit className="h-6 w-6" /> Patient Information
               </CardTitle>
-              <CardDescription>Please enter the patient's details below. This information can be used to get AI assistance for services.</CardDescription>
+              <CardDescription>Enter patient details. You can also use voice input for the 'Reason for Visit' after filling name and contact.</CardDescription>
             </CardHeader>
             <CardContent>
               <Form {...form}>
@@ -246,40 +405,75 @@ export default function DashboardPage() {
                       </FormItem>
                     )}
                   />
-                  <Button type="submit" className="w-full sm:w-auto" disabled={isSubmittingInfo}>
-                    {isSubmittingInfo ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
-                    Save Information
-                  </Button>
+                  <div className="flex flex-col sm:flex-row gap-2 items-center">
+                    <Button type="submit" className="w-full sm:w-auto" disabled={isSubmittingInfo}>
+                      {isSubmittingInfo ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : null}
+                      Save/Update Information
+                    </Button>
+                     <Button 
+                        type="button" 
+                        variant="outline" 
+                        onClick={toggleListening} 
+                        className="w-full sm:w-auto" 
+                        disabled={!speechRecognitionSupported || isSubmittingInfo || isFetchingSuggestions}
+                        title={!speechRecognitionSupported ? "Speech recognition not supported by your browser" : (isListening ? "Stop listening" : "Start voice input for 'Reason for Visit'")}
+                      >
+                        {isListening ? <MicOff className="mr-2 h-4 w-4 text-red-500" /> : <Mic className="mr-2 h-4 w-4" />}
+                        {isListening ? 'Listening...' : 'Voice Input for Visit Reason'}
+                      </Button>
+                  </div>
+                  {!speechRecognitionSupported && <p className="text-xs text-destructive mt-2">Voice input is not supported by your browser.</p>}
                 </form>
               </Form>
             </CardContent>
           </Card>
 
-          {submittedData && (
-            <Card className="shadow-lg">
+          {voiceTranscript && (
+            <Card className="shadow-sm border-blue-500">
               <CardHeader>
-                <CardTitle className="flex items-center gap-2 text-xl md:text-2xl text-primary">
-                  <CheckCircle2 className="h-6 w-6 text-green-500" /> Information Confirmation
+                <CardTitle className="flex items-center gap-2 text-lg text-blue-600">
+                  <MessagesSquare className="h-5 w-5" /> Last Voice Input
                 </CardTitle>
-                <CardDescription>Review the entered information. If correct, you can get AI-powered assistance.</CardDescription>
               </CardHeader>
-              <CardContent className="space-y-3 text-sm">
-                <p><strong>Name:</strong> {submittedData.name}</p>
-                <p><strong>Contact Details:</strong> {submittedData.contactDetails}</p>
-                <p><strong>Appointment Details:</strong> {submittedData.appointmentDetails}</p>
+              <CardContent>
+                <p className="text-sm text-muted-foreground italic">"{voiceTranscript}"</p>
+                 {voiceError && <p className="text-sm text-destructive mt-2">{voiceError}</p>}
               </CardContent>
-              <CardFooter>
-                <Button onClick={handleGetAssistance} className="w-full sm:w-auto" disabled={isFetchingSuggestions}>
-                  {isFetchingSuggestions ? (
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                  ) : (
-                    <Sparkles className="mr-2 h-4 w-4" />
-                  )}
-                  Get Intelligent Assistance
-                </Button>
-              </CardFooter>
             </Card>
           )}
+          
+          {(submittedData || form.getValues('appointmentDetails')) && !aiSuggestions && !isFetchingSuggestions && (
+            <Card className="shadow-lg">
+                <CardHeader>
+                    <CardTitle className="flex items-center gap-2 text-xl md:text-2xl text-primary">
+                        <CheckCircle2 className="h-6 w-6 text-green-500" /> Ready for Assistance
+                    </CardTitle>
+                    <CardDescription>
+                        {submittedData?.appointmentDetails ? 
+                        `Review the information. If correct, click below to get AI-powered assistance for "${submittedData.appointmentDetails.substring(0,50)}${submittedData.appointmentDetails.length > 50 ? '...' : ''}".`
+                        : "Information is ready. Click below to get AI-powered assistance."}
+                    </CardDescription>
+                </CardHeader>
+                {submittedData && (
+                    <CardContent className="space-y-1 text-sm border-b pb-4 mb-4">
+                        <p><strong>Name:</strong> {submittedData.name}</p>
+                        <p><strong>Contact:</strong> {submittedData.contactDetails}</p>
+                        <p><strong>Details:</strong> {submittedData.appointmentDetails}</p>
+                    </CardContent>
+                )}
+                <CardFooter>
+                    <Button onClick={() => handleGetAssistance()} className="w-full sm:w-auto" disabled={isFetchingSuggestions || !((submittedData?.name && submittedData?.contactDetails && submittedData?.appointmentDetails) || (form.getValues("name") && form.getValues("contactDetails") && form.getValues("appointmentDetails")))}>
+                    {isFetchingSuggestions ? (
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                    ) : (
+                        <Sparkles className="mr-2 h-4 w-4" />
+                    )}
+                    Get Intelligent Assistance
+                    </Button>
+                </CardFooter>
+            </Card>
+          )}
+
 
           {isFetchingSuggestions && !aiSuggestions && (
              <Card className="shadow-lg">
@@ -300,8 +494,9 @@ export default function DashboardPage() {
               <CardHeader>
                 <CardTitle className="flex items-center gap-2 text-xl md:text-2xl text-primary">
                   <Sparkles className="h-6 w-6" /> AI Suggested Services
+                   {isSpeaking && <Volume2 className="h-5 w-5 ml-2 text-blue-500 animate-pulse" />}
                 </CardTitle>
-                <CardDescription>Based on the provided information, here are some relevant services and information:</CardDescription>
+                <CardDescription>Based on the provided information, here are some relevant services and information. {speechSynthesisSupported && !isSpeaking && aiSuggestions.suggestedServices && <Button variant="link" size="sm" className="p-0 h-auto" onClick={() => speakText(aiSuggestions.suggestedServices!)}>Speak again</Button>}</CardDescription>
               </CardHeader>
               <CardContent>
                 {aiSuggestions.suggestedServices ? (
@@ -313,7 +508,7 @@ export default function DashboardPage() {
                 ) : (
                   <div className="flex items-center text-muted-foreground">
                       <AlertTriangle className="h-5 w-5 mr-2 text-yellow-500"/>
-                      <p>No specific suggestions available at this time.</p>
+                      <p>No specific suggestions available at this time, or an error occurred.</p>
                   </div>
                 )}
               </CardContent>
