@@ -18,7 +18,7 @@ import { Logo } from '@/components/logo';
 import { useToast } from '@/hooks/use-toast';
 import { patientInfoSchema, type PatientInfoFormData } from '@/lib/schemas';
 import { getAISuggestions } from './actions';
-import type { SuggestServicesOutput } from '@/ai/flows/suggest-services';
+import type { SuggestServicesInput, SuggestServicesOutput } from '@/ai/flows/suggest-services';
 import type { Appointment } from '@/lib/types';
 import { Loader2, LogOut, UserCircle, Phone, ClipboardEdit, Sparkles, CheckCircle2, AlertTriangle, Users, ListChecks, ClockIcon, CalendarX2, ThumbsUp, XCircle, Mic, MicOff, Volume2, MessagesSquare, Languages } from 'lucide-react';
 import { useRouter } from 'next/navigation';
@@ -214,8 +214,11 @@ export default function DashboardPage() {
     setIsFetchingSuggestions(true);
     setAiSuggestions(null);
     try {
-      // The AI flow input doesn't currently take language, it will respond in its default (likely English)
-      const suggestions = await getAISuggestions(currentData);
+      const aiInput: SuggestServicesInput = {
+        ...currentData,
+        language: selectedVoiceLanguage,
+      };
+      const suggestions = await getAISuggestions(aiInput);
       setAiSuggestions(suggestions);
       toast({
         title: "Suggestions Ready",
@@ -276,7 +279,7 @@ export default function DashboardPage() {
         setIsListening(false);
         return;
       }
-      const voiceInputData = { name, contactDetails, appointmentDetails: transcript };
+      const voiceInputData: PatientInfoFormData = { name, contactDetails, appointmentDetails: transcript };
       setSubmittedData(voiceInputData); 
       handleGetAssistance(voiceInputData);
     };
@@ -468,7 +471,7 @@ export default function DashboardPage() {
                     </div>
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
-                      {currentSelectedLanguageLabel} voice input is enabled. AI responses will likely be in English but spoken in the selected language if supported.
+                      Using {currentSelectedLanguageLabel} for voice input. AI will respond in {currentSelectedLanguageLabel} if possible. Spoken output uses {currentSelectedLanguageLabel} voice if available.
                   </p>
                   {!speechRecognitionSupported && <p className="text-xs text-destructive mt-2">Voice input is not supported by your browser.</p>}
                 </form>
@@ -545,7 +548,7 @@ export default function DashboardPage() {
                    {isSpeaking && <Volume2 className="h-5 w-5 ml-2 text-blue-500 animate-pulse" />}
                 </CardTitle>
                 <CardDescription>
-                    Based on the provided information, here are some relevant services.
+                    Based on the provided information, here are some relevant services (in {currentSelectedLanguageLabel} if available).
                     {speechSynthesisSupported && !isSpeaking && aiSuggestions.suggestedServices && 
                     <Button variant="link" size="sm" className="p-0 h-auto ml-1" onClick={() => speakText(aiSuggestions.suggestedServices!)}>
                         Speak again ({currentSelectedLanguageLabel})
@@ -655,7 +658,3 @@ export default function DashboardPage() {
     </div>
   );
 }
-
-    
-
-    

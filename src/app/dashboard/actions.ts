@@ -1,3 +1,4 @@
+
 "use server";
 
 import { suggestServices, type SuggestServicesInput, type SuggestServicesOutput } from '@/ai/flows/suggest-services';
@@ -10,6 +11,7 @@ export async function getAISuggestions(input: SuggestServicesInput): Promise<Sug
       throw new Error("All patient information fields are required for AI suggestions.");
     }
     
+    // The language field is optional in SuggestServicesInput and will be handled by the flow if present.
     const result = await suggestServices(input);
     return result;
   } catch (error) {
