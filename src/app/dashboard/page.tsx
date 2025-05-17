@@ -211,16 +211,17 @@ export default function DashboardPage() {
       return;
     }
     
-    if (form.formState.isValid) {
-        setSubmittedData(form.getValues());
+    if (form.formState.isValid || submittedData) { // Check if form is valid OR if submittedData exists (meaning it was previously validated)
+        setSubmittedData(form.getValues()); // Update submittedData with current form values if triggering via this button
     }
+
 
     setIsFetchingSuggestions(true);
     setAiSuggestions(null);
     setVoiceBookingResponse(null); 
     try {
       const aiInput: SuggestServicesInput = {
-        ...currentData,
+        ...(submittedData || currentData), // Prioritize already submitted data if available
         language: selectedVoiceLanguage, 
       };
       const suggestions = await getAISuggestions(aiInput);
@@ -336,13 +337,15 @@ export default function DashboardPage() {
 
     recognitionRef.current.onerror = (event: SpeechRecognitionErrorEvent) => {
       const errorType = event.error;
+      const errorMessage = (event as any).message || "No specific message from event.";
       // Log detailed error information for debugging
       console.error("Speech recognition error details:", {
         error: errorType,
-        message: (event as any).message, // event.message is not standard but some browsers provide it
+        message: errorMessage,
         selectedLang: selectedVoiceLanguage,
-        fullEvent: event,
+        // fullEvent: event, // Removed to simplify Next.js overlay summary
       });
+      // For full event details, you can inspect 'event' in browser dev tools if needed.
 
       let title = "Voice Input Error";
       let description = `An unexpected error occurred during voice recognition for ${selectedLangLabel}.`;
@@ -370,7 +373,7 @@ export default function DashboardPage() {
            description = `The speech recognition service is not allowed for ${selectedLangLabel}, possibly due to browser or system policy.`;
            break;
         default:
-          description = `An unknown error (${errorType}) occurred during voice recognition for ${selectedLangLabel}. Please try again.`;
+          description = `An unknown error (${errorType}: ${errorMessage}) occurred during voice recognition for ${selectedLangLabel}. Please try again.`;
       }
       
       setVoiceError(description); 
@@ -480,7 +483,7 @@ export default function DashboardPage() {
               <CardTitle className="flex items-center gap-2 text-xl md:text-2xl text-primary">
                 <ClipboardEdit className="h-6 w-6" /> Patient Information & General Assistance
               </CardTitle>
-              <CardDescription>Enter patient details and reason for visit to get general AI suggestions. For voice appointment booking, use the "Book by Voice" button below.</CardDescription>
+              <CardDescription>Enter patient details and reason for visit to get general AI suggestions. For voice appointment booking, use the "{voiceButtonLabel}" button below.</CardDescription>
             </CardHeader>
             <CardContent>
               <Form {...form}>
@@ -631,7 +634,7 @@ export default function DashboardPage() {
                    {isSpeaking && <Volume2 className="h-5 w-5 ml-2 text-blue-500 animate-pulse" />}
                 </CardTitle>
                 <CardDescription>
-                    Based on the information you typed, here are some relevant services (in {currentSelectedLanguageLabel}).
+                    Based on the information you typed, here are some relevant services. AI should respond in {currentSelectedLanguageLabel}.
                     {speechSynthesisSupported && !isSpeaking && aiSuggestions.suggestedServices && 
                     <Button variant="link" size="sm" className="p-0 h-auto ml-1" onClick={() => speakText(aiSuggestions.suggestedServices!, selectedVoiceLanguage)}>
                         Speak again ({currentSelectedLanguageLabel})
